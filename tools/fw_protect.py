@@ -24,12 +24,12 @@ def aes_encrypt(firmware):
     ciphertext = cipher.encrypt(firmware)
     return ciphertext
 
-def rsa_sign(encrypted_firmware):
+def rsa_sign(encrypted_firmwware_and_metadata):
     rsa_priv_key_directory = ''
     with open(rsa_priv_key_directory, 'rb') as f:
-        data = f.read()
-        rsa_priv_key = RSA.import_key(data)
-        h = SHA256.new(data)
+        key = f.read()
+        rsa_priv_key = RSA.import_key(key)
+        h = SHA256.new(encrypted_firmwware_and_metadata)
         signature = pkcs1_15.new(rsa_priv_key).sign(h)
     return signature
 
