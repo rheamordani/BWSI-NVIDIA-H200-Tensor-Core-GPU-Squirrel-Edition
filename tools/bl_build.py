@@ -17,6 +17,8 @@ REPO_ROOT = pathlib.Path(__file__).parent.parent.absolute()
 BOOTLOADER_DIR = os.path.join(REPO_ROOT, "bootloader")
 
 
+
+
 def make_bootloader() -> bool:
     # Build the bootloader from source.
 
