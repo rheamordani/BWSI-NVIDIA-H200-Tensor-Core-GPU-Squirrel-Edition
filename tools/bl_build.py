@@ -12,10 +12,29 @@ the build outputs into the host tools directory for programming.
 import os
 import pathlib
 import subprocess
+from Crypto.Random import get_random_bytes
+from Crypto.PublicKey import RSA
+from Crypto.Cipher import AES
+from Crypto.Signature import pkcs1_15
+from Crypto.Hash import SHA256
+from Crypto.Util.Padding import pad, unpad
 
 REPO_ROOT = pathlib.Path(__file__).parent.parent.absolute()
 BOOTLOADER_DIR = os.path.join(REPO_ROOT, "bootloader")
 
+def generate_keys():
+    aes_key = get_random_bytes(16)
+    keys_dict = {}
+    rsa_key = RSA.generate(2048)
+    rsa_private_key = rsa_key
+    rsa_public_key = rsa_key.publickey()
+    keys_dict['aes'] = aes_key
+    keys_dict['rsa_priv'] = rsa_private_key
+    keys_dict['rsa_pub'] = rsa_public_key
+    with open(BOOTLOADER_DIR+'/src/secret_build_output.txt', 'wb') as f:
+        f.write(keys_dict)
+
+## create header file for c
 
 def make_bootloader() -> bool:
     # Build the bootloader from source.

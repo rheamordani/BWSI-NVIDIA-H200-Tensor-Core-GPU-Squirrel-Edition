@@ -14,6 +14,7 @@ from Crypto.PublicKey import RSA
 from Crypto.Cipher import AES
 from Crypto.Signature import pkcs1_15
 from Crypto.Hash import SHA256
+from Crypto.Util.Padding import pad, unpad
 
 def aes_encrypt(firmware):
     aes_key_directory = ''
@@ -21,16 +22,16 @@ def aes_encrypt(firmware):
         aes_key = f.read()
     iv = get_random_bytes(16)
     cipher = AES.new(aes_key, AES.MODE_CBC, iv=iv)
-    ciphertext = cipher.encrypt(firmware)
+    ciphertext = cipher.encrypt(pad(firmware, 16))
     return ciphertext
 
 def rsa_sign(encrypted_firmwware_and_metadata):
     rsa_priv_key_directory = ''
     with open(rsa_priv_key_directory, 'rb') as f:
         key = f.read()
-        rsa_priv_key = RSA.import_key(key)
-        h = SHA256.new(encrypted_firmwware_and_metadata)
-        signature = pkcs1_15.new(rsa_priv_key).sign(h)
+    rsa_priv_key = RSA.import_key(key)
+    h = SHA256.new(encrypted_firmwware_and_metadata)
+    signature = pkcs1_15.new(rsa_priv_key).sign(h)
     return signature
 
 
