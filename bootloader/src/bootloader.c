@@ -26,6 +26,7 @@
 
 
 #include "inc/keys.h"
+#include "jansson.h"
 
 // Forward Declarations
 void load_firmware(void);
@@ -45,6 +46,9 @@ void uart_write_hex_bytes(uint8_t, uint8_t *, uint32_t);
 #define ERROR ((unsigned char)0x01)
 #define UPDATE ((unsigned char)'U')
 #define BOOT ((unsigned char)'B')
+
+#define AES_BLOCK_SIZE 16
+#define AES_KEY_SIZE 32
 
 // Device metadata
 uint16_t * fw_version_address = (uint16_t *)METADATA_BASE;
@@ -198,6 +202,49 @@ void load_firmware(void) {
         return;
     }
     uint8_t index = 0;
+
+    AES256 aes256;
+    aes_init(&aes256);
+    aes256_update(&aes256, (const byte *)&metadata, sizeof(metadata));
+    aes256_final(&aes256, hash);
+
+    unsigned char hash1[SHA256_DIGEST_SIZE];
+    unsigned char hash2[SHA256_DIGEST_SIZE];
+    compute_sha256(data1, hash1);
+    compute_sha256(data2, hash2);
+
+    if (memcmp(hash1, hash2, SHA256_DIGEST_SIZE) == 0) {
+        printf("Hashes match. Proceeding with decryption.\n");
+
+        int ciphertext_len;
+        unsigned char *ciphertext = base64_decode(encrypted_frame, &ciphertext_len);
+
+        if (ciphertext_len < AES_BLOCK_SIZE) {
+            fprintf(stderr, "Ciphertext too short\n");
+            return 1;
+        }
+
+        unsigned char iv[AES_BLOCK_SIZE];
+        memcpy(iv, ciphertext, AES_BLOCK_SIZE);
+
+        unsigned char *decrypted_text = (unsigned char *)malloc(ciphertext_len - AES_BLOCK_SIZE + 1);
+        int decrypted_len = aes_decrypt(ciphertext + AES_BLOCK_SIZE, ciphertext_len - AES_BLOCK_SIZE, key, iv, decrypted_text);
+        decrypted_text[decrypted_len] = '\0';
+
+        printf("Decrypted text: %s\n", decrypted_text);
+
+        if (verify_metadata((char *)decrypted_text, "timestamp", expected_timestamp) &&
+            verify_metadata((char *)decrypted_text, "sender", expected_sender)) {
+            printf("Metadata verification successful\n");
+        } else {
+            printf("Metadata verification failed\n");
+        }
+
+        free(ciphertext);
+        free(decrypted_text);
+    } else {
+        printf("Hashes do not match. Stopping decryption.\n");
+    }
 
     /* Loop here until you can get all your characters and stuff */
     while (1) {
