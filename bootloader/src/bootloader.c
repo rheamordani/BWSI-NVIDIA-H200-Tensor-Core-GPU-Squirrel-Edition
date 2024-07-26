@@ -137,9 +137,13 @@ void load_firmware(void) {
     uint8_t rsa_signature [256];
     uint8_t iv [16];
 
-    // Get version.
+    // Get message type.
     rcv = uart_read(UART0, BLOCKING, &read);
     message_type = (uint32_t)rcv;
+    rcv = uart_read(UART0, BLOCKING, &read);
+    message_type |= (uint32_t)rcv << 8;
+
+    // Get version.
     rcv = uart_read(UART0, BLOCKING, &read);
     version = (uint32_t)rcv;
     rcv = uart_read(UART0, BLOCKING, &read);
@@ -158,7 +162,7 @@ void load_firmware(void) {
         old_version = 1;
     }
 
-        if (message_type != 0){
+    if (message_type != 0){
         uart_write(UART0, ERROR); 
         SysCtlReset();
         return;
@@ -168,7 +172,8 @@ void load_firmware(void) {
         uart_write(UART0, ERROR); // Reject the metadata.
         SysCtlReset();            // Reset device
         return;
-    } else if (version == 0) {
+    } 
+    else if (version == 0) {
         // If debug firmware, don't change version
         version = old_version;
     }
@@ -188,6 +193,7 @@ void load_firmware(void) {
         rcv = uart_read(UART1, BLOCKING, &read);
         rsa_signature[i] = (char) rcv;
     }
+
     rsa_key_init(&rsa_key);
     rsa_public_key_decode(&rsa_key, rsa_pub_key, sizeof(rsa_key))
     uint8_t hash[SHA256_DIGEST_SIZE];
@@ -201,55 +207,11 @@ void load_firmware(void) {
         SysCtlReset();
         return;
     }
-    uint8_t index = 0;
-
-    AES256 aes256;
-    aes_init(&aes256);
-    aes256_update(&aes256, (const byte *)&metadata, sizeof(metadata));
-    aes256_final(&aes256, hash);
-
-    unsigned char hash1[SHA256_DIGEST_SIZE];
-    unsigned char hash2[SHA256_DIGEST_SIZE];
-    compute_sha256(data1, hash1);
-    compute_sha256(data2, hash2);
-
-    if (memcmp(hash1, hash2, SHA256_DIGEST_SIZE) == 0) {
-        printf("Hashes match. Proceeding with decryption.\n");
-
-        int ciphertext_len;
-        unsigned char *ciphertext = base64_decode(encrypted_frame, &ciphertext_len);
-
-        if (ciphertext_len < AES_BLOCK_SIZE) {
-            fprintf(stderr, "Ciphertext too short\n");
-            return 1;
-        }
-
-        unsigned char iv[AES_BLOCK_SIZE];
-        memcpy(iv, ciphertext, AES_BLOCK_SIZE);
-
-        unsigned char *decrypted_text = (unsigned char *)malloc(ciphertext_len - AES_BLOCK_SIZE + 1);
-        int decrypted_len = aes_decrypt(ciphertext + AES_BLOCK_SIZE, ciphertext_len - AES_BLOCK_SIZE, key, iv, decrypted_text);
-        decrypted_text[decrypted_len] = '\0';
-
-        printf("Decrypted text: %s\n", decrypted_text);
-
-        if (verify_metadata((char *)decrypted_text, "timestamp", expected_timestamp) &&
-            verify_metadata((char *)decrypted_text, "sender", expected_sender)) {
-            printf("Metadata verification successful\n");
-        } else {
-            printf("Metadata verification failed\n");
-        }
-
-        free(ciphertext);
-        free(decrypted_text);
-    } else {
-        printf("Hashes do not match. Stopping decryption.\n");
-    }
 
     /* Loop here until you can get all your characters and stuff */
     while (1) {
-        index += 1
         uint8_t frame_index;
+        frame_index +=1;
         uint8_t message_type;
         // Get two bytes for the length.
         rcv = uart_read(UART0, BLOCKING, &read);
@@ -261,10 +223,12 @@ void load_firmware(void) {
         message_type = (int)rcv << 8;
         rcv = uart_read(UART0, BLOCKING, &read);
         message_type += (int)rcv;
-        
+
+        rcv = uart_read(UART0, BLOCKING, &read);
         frame_length = (int)rcv << 8;
         rcv = uart_read(UART0, BLOCKING, &read);
         frame_length += (int)rcv;
+
         if ((int) frame_index =! (int) index){
             uart_write(UART0, ERROR); 
             SysCtlReset();
@@ -290,7 +254,7 @@ void load_firmware(void) {
                 SysCtlReset();            // Reset device
                 return;
             }
-            
+
             // Update to next page
             page_addr += FLASH_PAGESIZE;
             data_index = 0;
