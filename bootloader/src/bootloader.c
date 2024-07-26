@@ -24,6 +24,9 @@
 #include "wolfssl/wolfcrypt/sha.h"
 #include "wolfssl/wolfcrypt/rsa.h"
 
+
+#include "inc/keys.h"
+
 // Forward Declarations
 void load_firmware(void);
 void boot_firmware(void);
@@ -127,8 +130,12 @@ void load_firmware(void) {
     uint32_t page_addr = FW_BASE;
     uint32_t version = 0;
     uint32_t size = 0;
+    uint8_t rsa_signature [256];
+    uint8_t iv [16];
 
     // Get version.
+    rcv = uart_read(UART0, BLOCKING, &read);
+    message_type = (uint32_t)rcv;
     rcv = uart_read(UART0, BLOCKING, &read);
     version = (uint32_t)rcv;
     rcv = uart_read(UART0, BLOCKING, &read);
@@ -147,6 +154,12 @@ void load_firmware(void) {
         old_version = 1;
     }
 
+        if (message_type != 0){
+        uart_write(UART0, ERROR); 
+        SysCtlReset();
+        return;
+    }
+
     if (version != 0 && version < old_version) {
         uart_write(UART0, ERROR); // Reject the metadata.
         SysCtlReset();            // Reset device
@@ -163,21 +176,54 @@ void load_firmware(void) {
 
     uart_write(UART0, OK); // Acknowledge the metadata.
 
+    for (int i = 0; i < 16; i++) {
+        rcv = uart_read(UART1, BLOCKING, &read);
+        iv[i] = (uint8_t) rcv;
+    }
+    for (int i = 0; i < 100; i++) {
+        rcv = uart_read(UART1, BLOCKING, &read);
+        rsa_signature[i] = (char) rcv;
+    }
+    rsa_key_init(&rsa_key);
+    rsa_public_key_decode(&rsa_key, rsa_pub_key, sizeof(rsa_key))
+    uint8_t hash[SHA256_DIGEST_SIZE];
+    SHA256 sha256;
+    sha256_init(&sha256);
+    sha256_update(&sha256, (const byte *)&metadata, sizeof(metadata));
+    sha256_final(&sha256, hash);
+
+    if (rsa_verify(hash, sizeof(hash), rsa_signature, sizeof(rsa_signature), &rsa_key) != 0) {
+        uart_write(UART0, ERROR); 
+        SysCtlReset();
+        return;
+    }
+    uint8_t index = 0;
+
     /* Loop here until you can get all your characters and stuff */
     while (1) {
-
+        uint8_t frame_index;
+        uint8_t message_type;
         // Get two bytes for the length.
+        rcv = uart_read(UART0, BLOCKING, &read);
+        frame_index = (int)rcv << 8;
+        rcv = uart_read(UART0, BLOCKING, &read);
+        message_type = (int)rcv << 8;
         rcv = uart_read(UART0, BLOCKING, &read);
         frame_length = (int)rcv << 8;
         rcv = uart_read(UART0, BLOCKING, &read);
         frame_length += (int)rcv;
+
+        if (message_type == 1){
+            uart_write(UART0, ERROR); 
+            SysCtlReset();
+            return;
+        }
 
         // Get the number of bytes specified
         for (int i = 0; i < frame_length; ++i) {
             data[data_index] = uart_read(UART0, BLOCKING, &read);
             data_index += 1;
         } // for
-
         // If we filed our page buffer, program it
         if (data_index == FLASH_PAGESIZE || frame_length == 0) {
             // Try to write flash and check for error
@@ -186,7 +232,7 @@ void load_firmware(void) {
                 SysCtlReset();            // Reset device
                 return;
             }
-
+            
             // Update to next page
             page_addr += FLASH_PAGESIZE;
             data_index = 0;
