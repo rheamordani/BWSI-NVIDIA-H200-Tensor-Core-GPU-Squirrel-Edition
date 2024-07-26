@@ -201,17 +201,28 @@ void load_firmware(void) {
 
     /* Loop here until you can get all your characters and stuff */
     while (1) {
+        index += 1
         uint8_t frame_index;
         uint8_t message_type;
         // Get two bytes for the length.
         rcv = uart_read(UART0, BLOCKING, &read);
         frame_index = (int)rcv << 8;
         rcv = uart_read(UART0, BLOCKING, &read);
+        frame_index += (int)rcv;
+        
+        rcv = uart_read(UART0, BLOCKING, &read);
         message_type = (int)rcv << 8;
         rcv = uart_read(UART0, BLOCKING, &read);
+        message_type += (int)rcv;
+        
         frame_length = (int)rcv << 8;
         rcv = uart_read(UART0, BLOCKING, &read);
         frame_length += (int)rcv;
+        if ((int) frame_index =! (int) index){
+            uart_write(UART0, ERROR); 
+            SysCtlReset();
+            return;
+        }
 
         if (message_type != 1){
             uart_write(UART0, ERROR); 
