@@ -213,7 +213,7 @@ void load_firmware(void) {
         rcv = uart_read(UART0, BLOCKING, &read);
         frame_length += (int)rcv;
 
-        if (message_type == 1){
+        if (message_type != 1){
             uart_write(UART0, ERROR); 
             SysCtlReset();
             return;
