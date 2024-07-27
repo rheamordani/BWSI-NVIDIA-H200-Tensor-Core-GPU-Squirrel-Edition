@@ -26,7 +26,9 @@
 
 
 #include "inc/keys.h"
-#include "jansson.h"
+const uint8_t aes_key[] = AES_KEY;
+const uint8_t rsa_public_key[] = RSA_PUBLIC_KEY;
+
 
 // Forward Declarations
 void load_firmware(void);
@@ -194,8 +196,8 @@ void load_firmware(void) {
         rsa_signature[i] = (char) rcv;
     }
 
-    rsa_key_init(&rsa_key);
-    rsa_public_key_decode(&rsa_key, rsa_pub_key, sizeof(rsa_key))
+    rsa_key_init(&rsa_public_key);
+    rsa_public_key_decode(&rsa_public_key, rsa_public_key, sizeof(rsa_public_key))
     uint8_t hash[SHA256_DIGEST_SIZE];
     SHA256 sha256;
     sha256_init(&sha256);
@@ -213,7 +215,7 @@ void load_firmware(void) {
         uint8_t frame_index;
         frame_index +=1;
         uint8_t message_type;
-        // Get two bytes for the length.
+        
         rcv = uart_read(UART0, BLOCKING, &read);
         frame_index = (int)rcv << 8;
         rcv = uart_read(UART0, BLOCKING, &read);
@@ -235,16 +237,12 @@ void load_firmware(void) {
             return;
         }
 
-        if (message_type != 1){
-            uart_write(UART0, ERROR); 
-            SysCtlReset();
-            return;
-        }
-
         // Get the number of bytes specified
         for (int i = 0; i < frame_length; ++i) {
-            data[data_index] = uart_read(UART0, BLOCKING, &read);
-            data_index += 1;
+            if (message_type == 1){
+                data[data_index] = uart_read(UART0, BLOCKING, &read);
+                data_index += 1;
+            }
         } // for
         // If we filed our page buffer, program it
         if (data_index == FLASH_PAGESIZE || frame_length == 0) {
