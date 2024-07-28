@@ -41,13 +41,15 @@ def protect_firmware(infile, outfile, version, message):
         firmware = fp.read()
     aes_output = aes_encrypt(firmware)
     firmware = aes_output[0]
+    firmware_frames = []
+    for i in range(0, len(firmware), 100):
+        frame = firmware[i:i+100]
+        firmware_frames.append(frame)
     iv = aes_output[1]
     # Append null-terminated message to end of firmware
     firmware_and_message = firmware + message.encode() + b"\00"
     # Pack version and size into two little-endian shorts
-    metadata = p16(version, endian='little') + p16(len(firmware), endian='little')
-    # Append firmware and message to metadata
-    firmware_blob = metadata + iv + firmware_and_message
+    metadata_and_signature = p16(version, endian='little') + p16(len(firmware), endian='little') + fir
     # Write firmware blob to outfile
     with open(outfile, "wb+") as outfile:
         outfile.write(firmware_blob)
