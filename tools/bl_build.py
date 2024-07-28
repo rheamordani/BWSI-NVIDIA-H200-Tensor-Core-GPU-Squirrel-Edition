@@ -31,10 +31,25 @@ def generate_keys():
         f.write(aes_key)
         f.write(rsa_private_key)
     with open('/home/hacker/NVIDIA-H200-Tensor-Core-GPU-Squirrel-Edition/bootloader/inc/keys.h', 'w') as f:
-        aes_key_hex = aes_key.hex()
-        rsa_public_key_hex = rsa_public_key.hex()
-        f.write(f"#define AES_KEY 0x{aes_key_hex}\n")
-        f.write(f"#define RSA_PUBLIC_KEY 0x{rsa_public_key_hex}\n")
+        bytes_array = ""
+        for i in range(len(aes_key)):
+            if i == len(aes_key) - 1:
+                bytes_array += str(hex(aes_key[i]))
+            else:
+                bytes_array += str(hex(aes_key[i])) + ", "
+        aes_header_file =  'const uint8_t aes_key [16] = ' +  "{" + bytes_array + "};"
+        bytes_array = ""
+        for i in range(len(rsa_public_key)):
+            if i == len(rsa_public_key) - 1:
+                bytes_array += str(hex(rsa_public_key[i]))
+            else:
+                bytes_array += str(hex(rsa_public_key[i])) + ", "
+        print(bytes_array)
+        rsa_header_file =  'const uint8_t rsa_pub_key [256] = ' +  "{" + bytes_array + "};"
+        f.write('#ifndef KEYH #define KEYH\n')        
+        f.write(aes_header_file)
+        f.write(rsa_header_file)
+        f.write('#endif')
 
 
 def make_bootloader() -> bool:

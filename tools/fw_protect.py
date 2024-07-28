@@ -16,6 +16,15 @@ from Crypto.Signature import pkcs1_15
 from Crypto.Hash import SHA256
 from Crypto.Util.Padding import pad, unpad
 
+def rsa_sign(firmware):
+    with open('secret_build_output', 'rb') as f:
+        f.seek(16)
+        key = f.read()
+    rsa_priv_key = RSA.import_key(key)
+    h = SHA256.new(firmware)
+    signature = pkcs1_15.new(rsa_priv_key).sign(h)
+    return signature
+
 
 def aes_encrypt(firmware):
     with open('secret_build_output', 'rb') as f:

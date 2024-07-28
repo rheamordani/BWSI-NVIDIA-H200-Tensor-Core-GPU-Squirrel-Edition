@@ -7,6 +7,8 @@
 #include "inc/hw_memmap.h"    // Peripheral Base Addresses
 #include "inc/hw_types.h"     // Boolean type
 #include "inc/tm4c123gh6pm.h" // Peripheral Bit Masks and Registers
+#include "/home/hacker/NVIDIA-H200-Tensor-Core-GPU-Squirrel-Edition/bootloader/inc/keys.h"
+
 // #include "inc/hw_ints.h" // Interrupt numbers
 
 // Driver API Imports
@@ -23,7 +25,6 @@
 #include "wolfssl/wolfcrypt/aes.h"
 #include "wolfssl/wolfcrypt/sha.h"
 #include "wolfssl/wolfcrypt/rsa.h"
-#include "inc/keys.h"
 
 
 const uint8_t aes_key[] = AES_KEY;
@@ -199,7 +200,7 @@ void load_firmware(void) {
         rcv = uart_read(UART1, BLOCKING, &read);
         iv[i] = (uint8_t) rcv;
     }
-    for (int i = 0; i < 100; i++) {
+    for (int i = 0; i < 256; i++) {
         rcv = uart_read(UART1, BLOCKING, &read);
         rsa_signature[i] = (char) rcv;
     }
@@ -261,11 +262,6 @@ void load_firmware(void) {
         rcv = uart_read(UART0, BLOCKING, &read);
         frame_length += (int)rcv;
 
-        for (int i = 0; i < 100; i++) {
-            rcv = uart_read(UART1, BLOCKING, &read);
-            frame_rsa_signature[i] = (char) rcv;
-        }
-
         if (expected_frame_index != frame_index){
             reject();
         }
@@ -288,7 +284,25 @@ void load_firmware(void) {
             SysCtlReset();
             return;
         }
-
+        for (int i = 0; i < 256; i++) {
+            rcv = uart_read(UART1, BLOCKING, &read);
+            frame_rsa_signature[i] = (char) rcv;
+        }
+        
+        RsaKey pub;
+        wc_InitRsaKey(&pub, NULL);
+        int i = 0;
+        int ret;
+        byte output[256];
+        wc_RsaPublicKeyDecode(rsa_public_key, &i, &pub, sizeof(rsa_public_key));
+        ret = wc_RsaPSS_Verify(rsa_signature, sizeof(rsa_signature), output, sizeof(output), WC_HASH_TYPE_SHA256, WC_MGF1SHA256, &pub);
+        if(ret <= 0){// Verifying
+            uart_write_str(UART0, "Successfully Verified Signature!\n");
+        }
+        else{
+            uart_write_str(UART0, "ERROR");
+            reject();
+        }
 
         // If we filed our page buffer, program it
         if (data_index == FLASH_PAGESIZE || frame_length == 0) {
