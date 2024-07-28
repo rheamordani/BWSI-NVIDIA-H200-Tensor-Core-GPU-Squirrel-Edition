@@ -16,15 +16,6 @@ from Crypto.Signature import pkcs1_15
 from Crypto.Hash import SHA256
 from Crypto.Util.Padding import pad, unpad
 
-def rsa_sign(firmware):
-    with open('secret_build_output', 'rb') as f:
-        f.seek(16)
-        key = f.read()
-    rsa_priv_key = RSA.import_key(key)
-    h = SHA256.new(firmware)
-    signature = pkcs1_15.new(rsa_priv_key).sign(h)
-    return signature
-
 
 def aes_encrypt(firmware):
     with open('secret_build_output', 'rb') as f:
@@ -34,6 +25,14 @@ def aes_encrypt(firmware):
     ciphertext = cipher.encrypt(pad(firmware, 16))
     return ciphertext, iv
 
+def rsa_sign(firmware):
+    with open('secret_build_output', 'rb') as f:
+        f.seek(16)
+        key = f.read()
+    rsa_priv_key = RSA.import_key(key)
+    h = SHA256.new(firmware)
+    signature = pkcs1_15.new(rsa_priv_key).sign(h)
+    return signature
 
 def protect_firmware(infile, outfile, version, message):
     # Load firmware binary from infile
@@ -41,15 +40,13 @@ def protect_firmware(infile, outfile, version, message):
         firmware = fp.read()
     aes_output = aes_encrypt(firmware)
     firmware = aes_output[0]
-    firmware_frames = []
-    for i in range(0, len(firmware), 100):
-        frame = firmware[i:i+100]
-        firmware_frames.append(frame)
     iv = aes_output[1]
     # Append null-terminated message to end of firmware
     firmware_and_message = firmware + message.encode() + b"\00"
     # Pack version and size into two little-endian shorts
-    metadata_and_signature = p16(version, endian='little') + p16(len(firmware), endian='little') + fir
+    metadata = p16(version, endian='little') + p16(len(firmware), endian='little') + rsa_sign(p16(version, endian='little') + p16(len(firmware), endian='little'))
+    # Append firmware and message to metadata
+    firmware_blob = metadata + iv + firmware_and_message + rsa_sign(firmware)
     # Write firmware blob to outfile
     with open(outfile, "wb+") as outfile:
         outfile.write(firmware_blob)

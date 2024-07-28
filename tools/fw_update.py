@@ -48,7 +48,7 @@ def rsa_sign(firmware):
     signature = pkcs1_15.new(rsa_priv_key).sign(h)
     return signature
 
-def send_first_frame(ser, metadata, iv, debug=False):
+def send_first_frame(ser, metadata, iv, rsa_signature, debug=False):
     assert(len(metadata) == 4)
     version = u16(metadata[:2], endian='little')
     size = u16(metadata[2:], endian='little')
@@ -58,7 +58,6 @@ def send_first_frame(ser, metadata, iv, debug=False):
     message_type_bytes = p16(message_type, endian='little')  # Assuming little endian for message_type
     version_bytes = p16(version, endian='little')
     size_bytes = p16(size, endian='little')
-    rsa_signature = rsa_sign(metadata)
 
     print(f"Version: {version}\nSize: {size} bytes\n")
 
@@ -74,7 +73,7 @@ def send_first_frame(ser, metadata, iv, debug=False):
     if debug:
         print(metadata)
 
-    frame = message_type+version+size+iv+rsa_signature
+    frame = message_type_bytes + version_bytes + size_bytes + iv + rsa_signature
     ser.write(frame)
 
     # Wait for an OK from the bootloader.
@@ -106,16 +105,19 @@ def update(ser, infile, debug):
     with open(infile, "rb") as fp:
         metadata = fp.read(4)
         iv = fp.read(16)
-        firmware = fp.read()
+        size = u16(metadata[2:], endian='little')
+        metadata_rsa_signature = fp.read(256)
+        firmware = fp.read(size)
+        firmware_rsa_signature = fp.read()
 
-    send_first_frame(ser, metadata, iv, debug=debug)
+    send_first_frame(ser, metadata, iv, metadata_rsa_signature, debug=debug)
     index = 0
     for idx, frame_start in enumerate(range(0, len(firmware), 100)):
         data = firmware[frame_start : frame_start + 100]
         index += 1
         message_type = 1
         # Construct frame.
-        rsa_signature = rsa_sign(p16(len(idx), endian='big') + p16(len(message_type), endian='big') + p16(len(data), endian='big') + data)
+        rsa_signature = rsa_sign(data)
         frame = p16(len(idx), endian='big') + p16(len(message_type), endian='big') + p16(len(data), endian='big') + rsa_signature + data 
         send_frame(ser, frame, debug=debug)
         print(f"Wrote frame {idx} ({len(frame)} bytes)")
