@@ -28,23 +28,47 @@ import time
 import serial
 
 from util import *
+from Crypto.Random import get_random_bytes
+from Crypto.PublicKey import RSA
+from Crypto.Cipher import AES
+from Crypto.Signature import pkcs1_15
+from Crypto.Hash import SHA256
+from Crypto.Util.Padding import pad, unpad
 
 ser = serial.Serial("/dev/ttyACM0", 115200)
 
 RESP_OK = b"\x00"
-FRAME_SIZE = 256
+FRAME_SIZE = 262
 
+def rsa_sign(firmware):
+    with open('secret_build_output', 'rb') as f:
+        f.seek(16)
+        key = f.read()
+    rsa_priv_key = RSA.import_key(key)
+    h = SHA256.new(firmware)
+    signature = pkcs1_15.new(rsa_priv_key).sign(h)
+    return signature
 
-def send_metadata(ser, metadata, debug=False):
+def send_first_frame(ser, metadata, iv, debug=False):
     assert(len(metadata) == 4)
     version = u16(metadata[:2], endian='little')
     size = u16(metadata[2:], endian='little')
+    message_type = 0
+
+    # Convert integers to bytes
+    message_type_bytes = p16(message_type, endian='little')  # Assuming little endian for message_type
+    version_bytes = p16(version, endian='little')
+    size_bytes = p16(size, endian='little')
+
+    combined_message = message_type_bytes + version_bytes + size_bytes + iv
+    rsa_signature = rsa_sign(combined_message)
+
     print(f"Version: {version}\nSize: {size} bytes\n")
 
     # Handshake for update
     ser.write(b"U")
 
-    print("Waiting for bootloader to enter update mode...")
+    print("Waiting for bootloader to enter update mode...") 
     while ser.read(1).decode() != "U":
         print("got a byte")
         pass
@@ -53,12 +77,15 @@ def send_metadata(ser, metadata, debug=False):
     if debug:
         print(metadata)
 
-    ser.write(metadata)
+    frame = message_type+version+size+iv+rsa_signature
+    ser.write(frame)
 
     # Wait for an OK from the bootloader.
     resp = ser.read(1)
     if resp != RESP_OK:
         raise RuntimeError("ERROR: Bootloader responded with {}".format(repr(resp)))
+
+
 
 
 def send_frame(ser, frame, debug=False):
@@ -81,19 +108,19 @@ def send_frame(ser, frame, debug=False):
 def update(ser, infile, debug):
     # Open serial port. Set baudrate to 115200. Set timeout to 2 seconds.
     with open(infile, "rb") as fp:
-        firmware_blob = fp.read()
+        metadata = fp.read(4)
+        iv = fp.read(16)
+        firmware = fp.read()
 
-    metadata = firmware_blob[:4]
-    firmware = firmware_blob[4:]
-
-    send_metadata(ser, metadata, debug=debug)
-
+    send_first_frame(ser, metadata, iv, debug=debug)
+    index = 0
     for idx, frame_start in enumerate(range(0, len(firmware), FRAME_SIZE)):
         data = firmware[frame_start : frame_start + FRAME_SIZE]
-
+        index += 1
+        message_type = 1
         # Construct frame.
-        frame = p16(len(data), endian='big') + data
-
+        rsa_signature = rsa_sign(p16(len(idx), endian='big') + p16(len(message_type), endian='big') + p16(len(data), endian='big') + data)
+        frame = p16(len(idx), endian='big') + p16(len(message_type), endian='big') + p16(len(data), endian='big') + rsa_signature + data 
         send_frame(ser, frame, debug=debug)
         print(f"Wrote frame {idx} ({len(frame)} bytes)")
 

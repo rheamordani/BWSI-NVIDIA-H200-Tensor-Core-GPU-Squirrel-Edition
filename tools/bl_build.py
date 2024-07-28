@@ -23,15 +23,13 @@ REPO_ROOT = pathlib.Path(__file__).parent.parent.absolute()
 BOOTLOADER_DIR = os.path.join(REPO_ROOT, "bootloader")
 
 def generate_keys():
-    aes_key = get_random_bytes(32)
-    keys_dict = {}
+    aes_key = get_random_bytes(16)
     rsa_key = RSA.generate(2048)
     rsa_private_key = rsa_key.export_key()
     rsa_public_key = rsa_key.publickey().export_key()
     with open('secret_build_output', 'wb') as f:
         f.write(aes_key)
         f.write(rsa_private_key)
-        f.write(rsa_public_key)
     with open('/home/hacker/NVIDIA-H200-Tensor-Core-GPU-Squirrel-Edition/bootloader/inc/keys.h', 'w') as f:
         aes_key_hex = aes_key.hex()
         rsa_public_key_hex = rsa_public_key.hex()

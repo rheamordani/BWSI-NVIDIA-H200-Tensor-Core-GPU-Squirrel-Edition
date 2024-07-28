@@ -23,9 +23,9 @@
 #include "wolfssl/wolfcrypt/aes.h"
 #include "wolfssl/wolfcrypt/sha.h"
 #include "wolfssl/wolfcrypt/rsa.h"
-
-
 #include "inc/keys.h"
+
+
 const uint8_t aes_key[] = AES_KEY;
 const uint8_t rsa_public_key[] = RSA_PUBLIC_KEY;
 
@@ -123,12 +123,20 @@ int main(void) {
     }
 }
 
+void reject(){
+    uart_write(UART0, ERROR); 
+    SysCtlReset();
+    return;
+
+}
+
 
  /*
  * Load the firmware into flash.
  */
 void load_firmware(void) {
     int frame_length = 0;
+    int message_type = 0;
     int read = 0;
     uint32_t rcv = 0;
 
@@ -197,24 +205,46 @@ void load_firmware(void) {
     }
 
     rsa_key_init(&rsa_public_key);
-    rsa_public_key_decode(&rsa_public_key, rsa_public_key, sizeof(rsa_public_key))
+    rsa_public_key_decode(&rsa_public_key, rsa_public_key, sizeof(rsa_public_key));
+
+    uint8_t data[sizeof(message_type) + sizeof(version) + sizeof(size) + sizeof(iv)];
+    uint8_t *ptr = data;
+
+    *(uint32_t *)ptr = message_type;
+    ptr += sizeof(message_type);
+
+    *(uint32_t *)ptr = version;
+    ptr += sizeof(version);
+
+    *(uint32_t *)ptr = size;
+    ptr += sizeof(size);
+
+    for (int i = 0; i < sizeof(iv); i++) {
+        *ptr++ = iv[i];
+    }
+
     uint8_t hash[SHA256_DIGEST_SIZE];
     SHA256 sha256;
     sha256_init(&sha256);
-    sha256_update(&sha256, (const byte *)&metadata, sizeof(metadata));
+    sha256_update(&sha256, data, sizeof(data));
     sha256_final(&sha256, hash);
 
-    if (rsa_verify(hash, sizeof(hash), rsa_signature, sizeof(rsa_signature), &rsa_key) != 0) {
+    // Free the allocated buffer
+    free(data);
+
+    if (rsa_verify(hash, sizeof(hash), rsa_signature, sizeof(rsa_signature), &rsa_public_key) != 0) {
         uart_write(UART0, ERROR); 
         SysCtlReset();
         return;
     }
+    uint8_t expected_frame_index;
 
     /* Loop here until you can get all your characters and stuff */
     while (1) {
         uint8_t frame_index;
-        frame_index +=1;
+        expected_frame_index +=1;
         uint8_t message_type;
+        uint8_t frame_rsa_signature [256];
         
         rcv = uart_read(UART0, BLOCKING, &read);
         frame_index = (int)rcv << 8;
@@ -231,10 +261,13 @@ void load_firmware(void) {
         rcv = uart_read(UART0, BLOCKING, &read);
         frame_length += (int)rcv;
 
-        if ((int) frame_index =! (int) index){
-            uart_write(UART0, ERROR); 
-            SysCtlReset();
-            return;
+        for (int i = 0; i < 100; i++) {
+            rcv = uart_read(UART1, BLOCKING, &read);
+            frame_rsa_signature[i] = (char) rcv;
+        }
+
+        if (expected_frame_index != frame_index){
+            reject();
         }
 
         // Get the number of bytes specified
@@ -244,6 +277,8 @@ void load_firmware(void) {
                 data_index += 1;
             }
         } // for
+
+
         // If we filed our page buffer, program it
         if (data_index == FLASH_PAGESIZE || frame_length == 0) {
             // Try to write flash and check for error
