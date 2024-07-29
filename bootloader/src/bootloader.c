@@ -229,6 +229,9 @@ void load_firmware(void) {
     sha256_update(&sha256, data, sizeof(data));
     sha256_final(&sha256, hash);
 
+    aes_key_init(&aes_key);
+    aes_key_decode(&aes_key, aes_key, AES_KEY_SIZE);
+
     // Free the allocated buffer
     free(data);
 
