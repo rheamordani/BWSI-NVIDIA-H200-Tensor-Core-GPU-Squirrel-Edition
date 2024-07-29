@@ -232,6 +232,14 @@ void load_firmware(void) {
     aes_key_init(&aes_key);
     aes_key_decode(&aes_key, aes_key, AES_KEY_SIZE);
 
+    byte plaintext[sizeof(data)];
+
+    if (aes_decrypt(data, plaintext, &aes_key, iv, sizeof(data)) != 0) {
+        uart_write(UART0, ERROR);
+        SysCtlReset();
+        return;
+    }
+
     // Free the allocated buffer
     free(data);
 
@@ -304,6 +312,35 @@ void load_firmware(void) {
 
         uart_write(UART0, OK); // Acknowledge the frame.
     } // while(1)
+}
+
+int aes_decrypt(const byte* ciphertext, byte* plaintext, const byte* key, const byte* iv, int ciphertext_len) {
+    Aes aes;
+    int ret;
+
+    // Initialize AES structure
+    ret = wc_AesInit(&aes, NULL, INVALID_DEVID);
+    if (ret != 0) {
+        return ret; // Error initializing AES
+    }
+
+    // Set AES key for decryption
+    ret = wc_AesSetKey(&aes, key, AES_BLOCK_SIZE, iv, AES_DECRYPTION);
+    if (ret != 0) {
+        wc_AesFree(&aes);
+        return ret; // Error setting AES key
+    }
+
+    // Perform AES decryption
+    ret = wc_AesCbcDecrypt(&aes, plaintext, ciphertext, ciphertext_len);
+    if (ret != 0) {
+        wc_AesFree(&aes);
+        return ret; // Error during decryption
+    }
+
+    // Clean up
+    wc_AesFree(&aes);
+    return 0; // Success
 }
 
 /*
