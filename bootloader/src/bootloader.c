@@ -229,17 +229,6 @@ void load_firmware(void) {
     sha256_update(&sha256, data, sizeof(data));
     sha256_final(&sha256, hash);
 
-    aes_key_init(&aes_key);
-    aes_key_decode(&aes_key, aes_key, AES_KEY_SIZE);
-
-    byte plaintext[sizeof(data)];
-
-    if (aes_decrypt(data, plaintext, &aes_key, iv, sizeof(data)) != 0) {
-        uart_write(UART0, ERROR);
-        SysCtlReset();
-        return;
-    }
-
     // Free the allocated buffer
     free(data);
 
@@ -282,18 +271,29 @@ void load_firmware(void) {
         }
 
         // Get the number of bytes specified
-        for (int i = 0; i < frame_length; ++i) {
+        for (int i = 0; i < 100; ++i) {
             if (message_type == 1){
                 data[data_index] = uart_read(UART0, BLOCKING, &read);
                 data_index += 1;
             }
         } // for
 
+        aes_key_init(&aes_key);
+        aes_key_decode(&aes_key, aes_key, AES_KEY_SIZE);
+
+        byte plaintext[sizeof(data)];
+
+        if (aes_decrypt(data, plaintext, &aes_key, iv, sizeof(data)) != 0) {
+            uart_write(UART0, ERROR);
+            SysCtlReset();
+            return;
+        }
+
 
         // If we filed our page buffer, program it
         if (data_index == FLASH_PAGESIZE || frame_length == 0) {
             // Try to write flash and check for error
-            if (program_flash((uint8_t *) page_addr, data, data_index)) {
+            if (program_flash((uint8_t *) page_addr, plaintext, data_index)) {
                 uart_write(UART0, ERROR); // Reject the firmware
                 SysCtlReset();            // Reset device
                 return;
