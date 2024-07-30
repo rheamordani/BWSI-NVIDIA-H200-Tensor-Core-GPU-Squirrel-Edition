@@ -234,7 +234,7 @@ void load_firmware(void) {
 
     // Free the allocated buffer
     free(data);
-
+    
     if (rsa_verify(hash, sizeof(hash), rsa_signature, sizeof(rsa_signature), &rsa_public_key) != 0) {
         uart_write(UART0, ERROR); 
         SysCtlReset();

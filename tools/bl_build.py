@@ -22,15 +22,15 @@ from Crypto.Util.Padding import pad, unpad
 REPO_ROOT = pathlib.Path(__file__).parent.parent.absolute()
 BOOTLOADER_DIR = os.path.join(REPO_ROOT, "bootloader")
 
-def generate_keys():
+def generate_keys(): #gnerating keys
     aes_key = get_random_bytes(16)
     rsa_key = RSA.generate(2048)
     rsa_private_key = rsa_key.export_key()
     rsa_public_key = rsa_key.publickey().export_key()
-    with open('secret_build_output', 'wb') as f:
+    with open('secret_build_output', 'wb') as f: #writing keys to secret file
         f.write(aes_key)
         f.write(rsa_private_key)
-    with open('/home/hacker/NVIDIA-H200-Tensor-Core-GPU-Squirrel-Edition/bootloader/inc/keys.h', 'w') as f:
+    with open('/home/hacker/NVIDIA-H200-Tensor-Core-GPU-Squirrel-Edition/bootloader/inc/keys.h', 'w') as f: #writing keys to header file
         aes_key_hex = aes_key.hex()
         rsa_public_key_hex = rsa_public_key.hex()
         f.write(f"#define AES_KEY 0x{aes_key_hex}\n")
@@ -52,3 +52,4 @@ def make_bootloader() -> bool:
 if __name__ == "__main__":
     generate_keys()
     make_bootloader()
+

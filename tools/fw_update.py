@@ -38,7 +38,6 @@ from Crypto.Util.Padding import pad, unpad
 ser = serial.Serial("/dev/ttyACM0", 115200)
 
 RESP_OK = b"\x00"
-FRAME_SIZE = 262
 
 def rsa_sign(firmware):
     with open('secret_build_output', 'rb') as f:
@@ -59,9 +58,7 @@ def send_first_frame(ser, metadata, iv, debug=False):
     message_type_bytes = p16(message_type, endian='little')  # Assuming little endian for message_type
     version_bytes = p16(version, endian='little')
     size_bytes = p16(size, endian='little')
-
-    combined_message = message_type_bytes + version_bytes + size_bytes + iv
-    rsa_signature = rsa_sign(combined_message)
+    rsa_signature = rsa_sign(metadata)
 
     print(f"Version: {version}\nSize: {size} bytes\n")
 
@@ -87,7 +84,6 @@ def send_first_frame(ser, metadata, iv, debug=False):
 
 
 
-
 def send_frame(ser, frame, debug=False):
     ser.write(frame)  # Write the frame...
 
@@ -106,32 +102,37 @@ def send_frame(ser, frame, debug=False):
 
 
 def update(ser, infile, debug):
-    # Open serial port. Set baudrate to 115200. Set timeout to 2 seconds.
+    # Open firmware file
     with open(infile, "rb") as fp:
-        metadata = fp.read(4)
-        iv = fp.read(16)
-        firmware = fp.read()
+        metadata = fp.read(4)  # Read metadata (version and size)
+        iv = fp.read(16)      # Read initialization vector (IV)
+        firmware = fp.read()  # Read the remaining firmware data
 
     send_first_frame(ser, metadata, iv, debug=debug)
     index = 0
-    for idx, frame_start in enumerate(range(0, len(firmware), FRAME_SIZE)):
-        data = firmware[frame_start : frame_start + FRAME_SIZE]
+    for idx, frame_start in enumerate(range(0, len(firmware), 100)):
+        # Extract a chunk of firmware data
+        data = firmware[frame_start : frame_start + 100]
         index += 1
         message_type = 1
-        # Construct frame.
-        rsa_signature = rsa_sign(p16(len(idx), endian='big') + p16(len(message_type), endian='big') + p16(len(data), endian='big') + data)
-        frame = p16(len(idx), endian='big') + p16(len(message_type), endian='big') + p16(len(data), endian='big') + rsa_signature + data 
+        frame_length = len(data)
+
+        # Construct the frame with 2-byte index
+        rsa_signature = rsa_sign(p16(index, endian='big') + p16(message_type, endian='big') + p16(frame_length, endian='big') + data)
+        frame = p16(index, endian='big') + p16(message_type, endian='big') + p16(frame_length, endian='big') + rsa_signature + data
+        
         send_frame(ser, frame, debug=debug)
         print(f"Wrote frame {idx} ({len(frame)} bytes)")
 
     print("Done writing firmware.")
 
-    # Send a zero length payload to tell the bootlader to finish writing it's page.
+    # Send a zero length payload to signal the bootloader to finish writing the page
     ser.write(p16(0x0000, endian='big'))
-    resp = ser.read(1)  # Wait for an OK from the bootloader
+    resp = ser.read(1)
     if resp != RESP_OK:
         raise RuntimeError("ERROR: Bootloader responded to zero length frame with {}".format(repr(resp)))
     print(f"Wrote zero length frame (2 bytes)")
+
 
     return ser
 

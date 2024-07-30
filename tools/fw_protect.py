@@ -29,8 +29,8 @@ def aes_encrypt(firmware):
 def protect_firmware(infile, outfile, version, message):
     # Load firmware binary from infile
     with open(infile, "rb") as fp:
-        firmware = fp.read()
-    aes_output = aes_encrypt(firmware)
+        firmware = fp.read() #reading firmware
+    aes_output = aes_encrypt(firmware) 
     firmware = aes_output[0]
     iv = aes_output[1]
     # Append null-terminated message to end of firmware
