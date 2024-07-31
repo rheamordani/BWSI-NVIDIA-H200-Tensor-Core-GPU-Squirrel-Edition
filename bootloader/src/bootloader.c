@@ -392,3 +392,4 @@ void uart_write_hex_bytes(uint8_t uart, uint8_t * start, uint32_t len) {
         uart_write_str(uart, " ");
     }
 }
+
