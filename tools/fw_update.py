@@ -26,22 +26,20 @@ import argparse
 from pwn import *
 import time
 import serial
-import hashlib
 
 from util import *
 
 ser = serial.Serial("/dev/ttyACM0", 115200)
 
 RESP_OK = b"\x00"
-FRAME_SIZE = 280
+FRAME_SIZE = 256
 
 
 def send_metadata(ser, metadata, debug=False):
-    assert(len(metadata) == 2)
+    assert(len(metadata) == 4)
     version = u16(metadata[:2], endian='little')
     size = u16(metadata[2:], endian='little')
-
-    print(f"Version: {version}\nSize: {size} bytes\nMessage Type: {msg_type}\nRelease Message: {rel_msg}\nIV: {iv}")
+    print(f"Version: {version}\nSize: {size} bytes\n")
 
     # Handshake for update
     ser.write(b"U")
@@ -90,17 +88,11 @@ def update(ser, infile, debug):
 
     send_metadata(ser, metadata, debug=debug)
 
-    msg_type = 1
-    rsa_sign = hashlib.new('sha256')
-    rsa_sign.update(data.encode()) 
-
     for idx, frame_start in enumerate(range(0, len(firmware), FRAME_SIZE)):
         data = firmware[frame_start : frame_start + FRAME_SIZE]
 
         # Construct frame.
-        frame = idx + msg_type + p16(len(data), endian='big') + data + rsa_sign.hexdigest()
-
-        msg_type = msg_type + 1
+        frame = p16(len(data), endian='big') + data
 
         send_frame(ser, frame, debug=debug)
         print(f"Wrote frame {idx} ({len(frame)} bytes)")
