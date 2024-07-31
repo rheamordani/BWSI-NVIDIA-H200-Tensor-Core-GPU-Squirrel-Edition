@@ -53,3 +53,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     protect_firmware(infile=args.infile, outfile=args.outfile, version=int(args.version), message=args.message)
+
