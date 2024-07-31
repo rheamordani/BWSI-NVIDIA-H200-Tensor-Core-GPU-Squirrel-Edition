@@ -23,7 +23,7 @@ REPO_ROOT = pathlib.Path(__file__).parent.parent.absolute()
 BOOTLOADER_DIR = os.path.join(REPO_ROOT, "bootloader")
 
 def generate_keys():
-    aes_key = get_random_bytes(16)
+    aes_key = get_random_bytes(32)
     rsa_key = RSA.generate(2048)
     rsa_private_key = rsa_key.export_key()
     rsa_public_key = rsa_key.publickey().export_key()
@@ -37,9 +37,7 @@ def generate_keys():
                 bytes_array += str(hex(aes_key[i]))
             else:
                 bytes_array += str(hex(aes_key[i])) + ", "
-        print(len(aes_key))
-        print(len(rsa_public_key))
-        aes_header_file =  'const uint8_t aes_key' + '[' + str(len(bytes_array))+ ']' + '= ' +  "{" + bytes_array + "};\n"
+        aes_header_file =  'const uint8_t aes_key' + '[32]' + '= ' +  "{" + bytes_array + "};\n"
         bytes_array = ""
         for i in range(len(rsa_public_key)):
             if i == len(rsa_public_key) - 1:
@@ -47,8 +45,8 @@ def generate_keys():
             else:
                 bytes_array += str(hex(rsa_public_key[i])) + ", "
         print(bytes_array)
-        rsa_header_file =  'const uint8_t rsa_pub_key' + '[' + str(len(bytes_array)) + ']' + '= ' +  "{" + bytes_array + "};\n"
-        f.write('#ifndef KEYH #define KEYH\n')        
+        rsa_header_file =  'const uint8_t rsa_pub_key' + '[]' + '= ' +  "{" + bytes_array + "};\n"
+        f.write('#ifndef KEYH \n#define KEYH\n')        
         f.write(aes_header_file)
         f.write(rsa_header_file)
         f.write('#endif')

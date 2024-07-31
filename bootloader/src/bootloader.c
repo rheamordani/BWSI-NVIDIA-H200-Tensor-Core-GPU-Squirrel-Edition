@@ -7,8 +7,6 @@
 #include "inc/hw_memmap.h"    // Peripheral Base Addresses
 #include "inc/hw_types.h"     // Boolean type
 #include "inc/tm4c123gh6pm.h" // Peripheral Bit Masks and Registers
-#include "/home/hacker/NVIDIA-H200-Tensor-Core-GPU-Squirrel-Edition/bootloader/inc/keys.h"
-
 // #include "inc/hw_ints.h" // Interrupt numbers
 
 // Driver API Imports
@@ -25,11 +23,6 @@
 #include "wolfssl/wolfcrypt/aes.h"
 #include "wolfssl/wolfcrypt/sha.h"
 #include "wolfssl/wolfcrypt/rsa.h"
-
-
-const uint8_t aes_key[] = AES_KEY;
-const uint8_t rsa_public_key[] = RSA_PUBLIC_KEY;
-
 
 // Forward Declarations
 void load_firmware(void);
@@ -49,9 +42,6 @@ void uart_write_hex_bytes(uint8_t, uint8_t *, uint32_t);
 #define ERROR ((unsigned char)0x01)
 #define UPDATE ((unsigned char)'U')
 #define BOOT ((unsigned char)'B')
-
-#define AES_BLOCK_SIZE 16
-#define AES_KEY_SIZE 32
 
 // Device metadata
 uint16_t * fw_version_address = (uint16_t *)METADATA_BASE;
@@ -124,35 +114,20 @@ int main(void) {
     }
 }
 
-void reject(){
-    uart_write(UART0, ERROR); 
-    SysCtlReset();
-    return;
-
-}
-
 
  /*
  * Load the firmware into flash.
  */
 void load_firmware(void) {
     int frame_length = 0;
-    int message_type = 0;
     int read = 0;
     uint32_t rcv = 0;
 
     uint32_t data_index = 0;
     uint32_t page_addr = FW_BASE;
     uint32_t version = 0;
+    volatile uint32_t release_message_size = 0;
     uint32_t size = 0;
-    uint8_t rsa_signature [256];
-    uint8_t iv [16];
-
-    // Get message type.
-    rcv = uart_read(UART0, BLOCKING, &read);
-    message_type = (uint32_t)rcv;
-    rcv = uart_read(UART0, BLOCKING, &read);
-    message_type |= (uint32_t)rcv << 8;
 
     // Get version.
     rcv = uart_read(UART0, BLOCKING, &read);
@@ -173,20 +148,35 @@ void load_firmware(void) {
         old_version = 1;
     }
 
-    if (message_type != 0){
-        uart_write(UART0, ERROR); 
-        SysCtlReset();
-        return;
-    }
-
     if (version != 0 && version < old_version) {
         uart_write(UART0, ERROR); // Reject the metadata.
         SysCtlReset();            // Reset device
         return;
-    } 
-    else if (version == 0) {
+    } else if (version == 0) {
         // If debug firmware, don't change version
         version = old_version;
+    }
+
+    // // DELETE BEFORE SUBMISSION:
+    // else if (version == old_version){
+    //     version; 
+    // }
+
+    uint8_t iv[16];
+    for (int i = 0; i < 16; i++){
+        rcv = uart_read(UART0, BLOCKING, &read);
+        iv[i] = rcv;
+    }
+
+    rcv = uart_read(UART0, BLOCKING, &read);
+    release_message_size = (uint32_t)rcv;
+    rcv = uart_read(UART0, BLOCKING, &read);
+    release_message_size |= (uint32_t)rcv << 8;
+
+    volatile char encrypted_release_message[release_message_size];
+    for (int i = 0; i < release_message_size; i++){
+        rcv = uart_read(UART0, BLOCKING, &read);
+        encrypted_release_message[i] = rcv;
     }
 
     // Write new firmware size and version to Flash
@@ -196,118 +186,25 @@ void load_firmware(void) {
 
     uart_write(UART0, OK); // Acknowledge the metadata.
 
-    for (int i = 0; i < 16; i++) {
-        rcv = uart_read(UART1, BLOCKING, &read);
-        iv[i] = (uint8_t) rcv;
-    }
-    for (int i = 0; i < 256; i++) {
-        rcv = uart_read(UART1, BLOCKING, &read);
-        rsa_signature[i] = (char) rcv;
-    }
-
-    rsa_key_init(&rsa_public_key);
-    rsa_public_key_decode(&rsa_public_key, rsa_public_key, sizeof(rsa_public_key));
-
-    uint8_t data[sizeof(message_type) + sizeof(version) + sizeof(size) + sizeof(iv)];
-    uint8_t *ptr = data;
-
-    *(uint32_t *)ptr = message_type;
-    ptr += sizeof(message_type);
-
-    *(uint32_t *)ptr = version;
-    ptr += sizeof(version);
-
-    *(uint32_t *)ptr = size;
-    ptr += sizeof(size);
-
-    for (int i = 0; i < sizeof(iv); i++) {
-        *ptr++ = iv[i];
-    }
-
-    uint8_t hash[SHA256_DIGEST_SIZE];
-    SHA256 sha256;
-    sha256_init(&sha256);
-    sha256_update(&sha256, data, sizeof(data));
-    sha256_final(&sha256, hash);
-
-    // Free the allocated buffer
-    free(data);
-
-    if (rsa_verify(hash, sizeof(hash), rsa_signature, sizeof(rsa_signature), &rsa_public_key) != 0) {
-        uart_write(UART0, ERROR); 
-        SysCtlReset();
-        return;
-    }
-    uint8_t expected_frame_index;
-
     /* Loop here until you can get all your characters and stuff */
     while (1) {
-        uint8_t frame_index;
-        expected_frame_index +=1;
-        uint8_t message_type;
-        uint8_t frame_rsa_signature [256];
-        
-        rcv = uart_read(UART0, BLOCKING, &read);
-        frame_index = (int)rcv << 8;
-        rcv = uart_read(UART0, BLOCKING, &read);
-        frame_index += (int)rcv;
-        
-        rcv = uart_read(UART0, BLOCKING, &read);
-        message_type = (int)rcv << 8;
-        rcv = uart_read(UART0, BLOCKING, &read);
-        message_type += (int)rcv;
 
+        // Get two bytes for the length.
         rcv = uart_read(UART0, BLOCKING, &read);
         frame_length = (int)rcv << 8;
         rcv = uart_read(UART0, BLOCKING, &read);
         frame_length += (int)rcv;
 
-        if (expected_frame_index != frame_index){
-            reject();
-        }
-
         // Get the number of bytes specified
-        for (int i = 0; i < 100; ++i) {
-            if (message_type == 1){
-                data[data_index] = uart_read(UART0, BLOCKING, &read);
-                data_index += 1;
-            }
+        for (int i = 0; i < frame_length; ++i) {
+            data[data_index] = uart_read(UART0, BLOCKING, &read);
+            data_index += 1;
         } // for
-
-        aes_key_init(&aes_key);
-        aes_key_decode(&aes_key, aes_key, AES_KEY_SIZE);
-
-        byte plaintext[sizeof(data)];
-
-        if (aes_decrypt(data, plaintext, &aes_key, iv, sizeof(data)) != 0) {
-            uart_write(UART0, ERROR);
-            SysCtlReset();
-            return;
-        }
-        for (int i = 0; i < 256; i++) {
-            rcv = uart_read(UART1, BLOCKING, &read);
-            frame_rsa_signature[i] = (char) rcv;
-        }
-        
-        RsaKey pub;
-        wc_InitRsaKey(&pub, NULL);
-        int i = 0;
-        int ret;
-        byte output[256];
-        wc_RsaPublicKeyDecode(rsa_public_key, &i, &pub, sizeof(rsa_public_key));
-        ret = wc_RsaPSS_Verify(rsa_signature, sizeof(rsa_signature), output, sizeof(output), WC_HASH_TYPE_SHA256, WC_MGF1SHA256, &pub);
-        if(ret <= 0){// Verifying
-            uart_write_str(UART0, "Successfully Verified Signature!\n");
-        }
-        else{
-            uart_write_str(UART0, "ERROR");
-            reject();
-        }
 
         // If we filed our page buffer, program it
         if (data_index == FLASH_PAGESIZE || frame_length == 0) {
             // Try to write flash and check for error
-            if (program_flash((uint8_t *) page_addr, plaintext, data_index)) {
+            if (program_flash((uint8_t *) page_addr, data, data_index)) {
                 uart_write(UART0, ERROR); // Reject the firmware
                 SysCtlReset();            // Reset device
                 return;
@@ -326,35 +223,6 @@ void load_firmware(void) {
 
         uart_write(UART0, OK); // Acknowledge the frame.
     } // while(1)
-}
-
-int aes_decrypt(const byte* ciphertext, byte* plaintext, const byte* key, const byte* iv, int ciphertext_len) {
-    Aes aes;
-    int ret;
-
-    // Initialize AES structure
-    ret = wc_AesInit(&aes, NULL, INVALID_DEVID);
-    if (ret != 0) {
-        return ret; // Error initializing AES
-    }
-
-    // Set AES key for decryption
-    ret = wc_AesSetKey(&aes, key, AES_BLOCK_SIZE, iv, AES_DECRYPTION);
-    if (ret != 0) {
-        wc_AesFree(&aes);
-        return ret; // Error setting AES key
-    }
-
-    // Perform AES decryption
-    ret = wc_AesCbcDecrypt(&aes, plaintext, ciphertext, ciphertext_len);
-    if (ret != 0) {
-        wc_AesFree(&aes);
-        return ret; // Error during decryption
-    }
-
-    // Clean up
-    wc_AesFree(&aes);
-    return 0; // Success
 }
 
 /*
