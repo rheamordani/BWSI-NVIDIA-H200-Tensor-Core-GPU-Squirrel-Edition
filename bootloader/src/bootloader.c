@@ -23,6 +23,10 @@
 #include "wolfssl/wolfcrypt/aes.h"
 #include "wolfssl/wolfcrypt/sha.h"
 #include "wolfssl/wolfcrypt/rsa.h"
+#include "inc/keys.h"
+
+const uint8_t aes_key[] = AES_KEY;
+const uint8_t rsa_public_key[] = RSA_PUBLIC_KEY;
 
 // Forward Declarations
 void load_firmware(void);
@@ -43,23 +47,30 @@ void uart_write_hex_bytes(uint8_t, uint8_t *, uint32_t);
 #define UPDATE ((unsigned char)'U')
 #define BOOT ((unsigned char)'B')
 
+#define AES_BLOCK_SIZE 16
+#define AES_KEY_SIZE 32
+
+#define RSA_SIGNATURE_SIZE 0x100
+#define IV_SIZE 0x10
+
 // Device metadata
-uint16_t * fw_version_address = (uint16_t *)METADATA_BASE;
-uint16_t * fw_size_address = (uint16_t *)(METADATA_BASE + 2);
-uint8_t * fw_release_message_address;
+uint16_t *fw_version_address = (uint16_t *)METADATA_BASE;
+uint16_t *fw_size_address = (uint16_t *)(METADATA_BASE + 2);
+uint8_t *fw_release_message_address;
 
 // Firmware Buffer
 unsigned char data[FLASH_PAGESIZE];
 
 // Delay to allow time to connect GDB
 // green LED as visual indicator of when this function is running
-void debug_delay_led() {
-
+void debug_delay_led()
+{
     // Enable the GPIO port that is used for the on-board LED.
     SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOF);
 
     // Check if the peripheral access is enabled.
-    while (!SysCtlPeripheralReady(SYSCTL_PERIPH_GPIOF)) {
+    while (!SysCtlPeripheralReady(SYSCTL_PERIPH_GPIOF))
+    {
     }
 
     // Enable the GPIO pin for the LED (PF3).  Set the direction as output, and
@@ -76,14 +87,14 @@ void debug_delay_led() {
     GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_3, 0x0);
 }
 
-
-int main(void) {
-
+int main(void)
+{
     // Enable the GPIO port that is used for the on-board LED.
     SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOF);
 
     // Check if the peripheral access is enabled.
-    while (!SysCtlPeripheralReady(SYSCTL_PERIPH_GPIOF)) {
+    while (!SysCtlPeripheralReady(SYSCTL_PERIPH_GPIOF))
+    {
     }
 
     // Enable the GPIO pin for the LED (PF3).  Set the direction as output, and
@@ -98,15 +109,19 @@ int main(void) {
     uart_write_str(UART0, "Send \"U\" to update, and \"B\" to run the firmware.\n");
 
     int resp;
-    while (1) {
+    while (1)
+    {
         uint32_t instruction = uart_read(UART0, BLOCKING, &resp);
 
-        if (instruction == UPDATE) {
+        if (instruction == UPDATE)
+        {
             uart_write_str(UART0, "U");
             load_firmware();
             uart_write_str(UART0, "Loaded new firmware.\n");
             nl(UART0);
-        } else if (instruction == BOOT) {
+        }
+        else if (instruction == BOOT)
+        {
             uart_write_str(UART0, "B");
             uart_write_str(UART0, "Booting firmware...\n");
             boot_firmware();
@@ -114,12 +129,18 @@ int main(void) {
     }
 }
 
+void reject()
+{
+    uart_write(UART0, ERROR);
+    SysCtlReset();
+    return;
+}
 
- /*
+/*
  * Load the firmware into flash.
  */
-void load_firmware(void) {
-    int frame_length = 0;
+void load_firmware(void)
+{
     int read = 0;
     uint32_t rcv = 0;
 
@@ -127,6 +148,14 @@ void load_firmware(void) {
     uint32_t page_addr = FW_BASE;
     uint32_t version = 0;
     uint32_t size = 0;
+    uint8_t rsa_signature[256];
+    uint8_t iv[16];
+
+    // Get message type.
+    rcv = uart_read(UART0, BLOCKING, &read);
+    uint16_t message_type = (uint16_t)rcv;
+    rcv = uart_read(UART0, BLOCKING, &read);
+    message_type |= (uint16_t)rcv << 8;
 
     // Get version.
     rcv = uart_read(UART0, BLOCKING, &read);
@@ -143,15 +172,26 @@ void load_firmware(void) {
     // Compare to old version and abort if older (note special case for version 0).
     // If no metadata available (0xFFFF), accept version 1
     uint16_t old_version = *fw_version_address;
-    if (old_version == 0xFFFF) {
+    if (old_version == 0xFFFF)
+    {
         old_version = 1;
     }
 
-    if (version != 0 && version < old_version) {
+    if (message_type != 0)
+    {
+        uart_write(UART0, ERROR);
+        SysCtlReset();
+        return;
+    }
+
+    if (version != 0 && version < old_version)
+    {
         uart_write(UART0, ERROR); // Reject the metadata.
         SysCtlReset();            // Reset device
         return;
-    } else if (version == 0) {
+    }
+    else if (version == 0)
+    {
         // If debug firmware, don't change version
         version = old_version;
     }
@@ -159,93 +199,148 @@ void load_firmware(void) {
     // Write new firmware size and version to Flash
     // Create 32 bit word for flash programming, version is at lower address, size is at higher address
     uint32_t metadata = ((size & 0xFFFF) << 16) | (version & 0xFFFF);
-    program_flash((uint8_t *) METADATA_BASE, (uint8_t *)(&metadata), 4);
+    program_flash((uint8_t *)METADATA_BASE, (uint8_t *)(&metadata), 4);
 
     uart_write(UART0, OK); // Acknowledge the metadata.
 
-    /* Loop here until you can get all your characters and stuff */
-    while (1) {
-
-        // Get two bytes for the length.
+    for (int i = 0; i < IV_SIZE; i++)
+    {
         rcv = uart_read(UART0, BLOCKING, &read);
-        frame_length = (int)rcv << 8;
-        rcv = uart_read(UART0, BLOCKING, &read);
-        frame_length += (int)rcv;
-
-        // Get the number of bytes specified
-        for (int i = 0; i < frame_length; ++i) {
-            data[data_index] = uart_read(UART0, BLOCKING, &read);
-            data_index += 1;
-        } // for
-
-        // If we filed our page buffer, program it
-        if (data_index == FLASH_PAGESIZE || frame_length == 0) {
-            // Try to write flash and check for error
-            if (program_flash((uint8_t *) page_addr, data, data_index)) {
-                uart_write(UART0, ERROR); // Reject the firmware
-                SysCtlReset();            // Reset device
-                return;
-            }
-
-            // Update to next page
-            page_addr += FLASH_PAGESIZE;
-            data_index = 0;
-
-            // If at end of firmware, go to main
-            if (frame_length == 0) {
-                uart_write(UART0, OK);
-                break;
-            }
-        } // if
-
-        uart_write(UART0, OK); // Acknowledge the frame.
-    } // while(1)
-}
-
-/*
- * Program a stream of bytes to the flash.
- * This function takes the starting address of a 1KB page, a pointer to the
- * data to write, and the number of byets to write.
- *
- * This functions performs an erase of the specified flash page before writing
- * the data.
- */
-long program_flash(void* page_addr, unsigned char * data, unsigned int data_len) {
-    uint32_t word = 0;
-    int ret;
-    int i;
-
-    // Erase next FLASH page
-    FlashErase((uint32_t) page_addr);
-
-    // Clear potentially unused bytes in last word
-    // If data not a multiple of 4 (word size), program up to the last word
-    // Then create temporary variable to create a full last word
-    if (data_len % FLASH_WRITESIZE) {
-        // Get number of unused bytes
-        int rem = data_len % FLASH_WRITESIZE;
-        int num_full_bytes = data_len - rem;
-
-        // Program up to the last word
-        ret = FlashProgram((unsigned long *)data, (uint32_t) page_addr, num_full_bytes);
-        if (ret != 0) {
-            return ret;
-        }
-
-        // Create last word variable -- fill unused with 0xFF
-        for (i = 0; i < rem; i++) {
-            word = (word >> 8) | (data[num_full_bytes + i] << 24); // Essentially a shift register from MSB->LSB
-        }
-        for (i = i; i < 4; i++) {
-            word = (word >> 8) | 0xFF000000;
-        }
-
-        // Program word
-        return FlashProgram(&word, (uint32_t) page_addr + num_full_bytes, 4);
-    } else {
-        // Write full buffer of 4-byte words
-        return FlashProgram((unsigned long *)data, (uint32_t) page_addr, data_len);
+        iv[i] = (uint8_t)rcv;
     }
+    for (int i = 0; i < RSA_SIGNATURE_SIZE; i++)
+    {
+        rcv = uart_read(UART0, BLOCKING, &read);
+        rsa_signature[i] = (uint8_t)rcv;
+    }
+
+    RsaKey rsa_public_key;
+    wc_InitRsaKey(&rsa_public_key, NULL);
+    wc_RsaPublicKeyDecode(rsa_public_key, sizeof(rsa_public_key), &rsa_public_key, 0);
+
+    uint8_t data_header[2 + 2 + 2 + IV_SIZE];
+    uint8_t *ptr = data_header;
+
+    *(uint16_t *)ptr = message_type;
+    ptr += sizeof(message_type);
+
+    *(uint16_t *)ptr = version;
+    ptr += sizeof(version);
+
+    *(uint16_t *)ptr = size;
+    ptr += sizeof(size);
+
+    for (int i = 0; i < IV_SIZE; i++)
+    {
+        *ptr++ = iv[i];
+    }
+
+    uint8_t hash[SHA256_DIGEST_SIZE];
+    wc_Sha256 sha256;
+    wc_InitSha256(&sha256);
+    wc_Sha256Update(&sha256, data_header, sizeof(data_header));
+    wc_Sha256Final(&sha256, hash);
+
+    if (wc_RsaSSL_Verify(hash, sizeof(hash), rsa_signature, sizeof(rsa_signature), &rsa_public_key) != sizeof(hash))
+    {
+        uart_write(UART0, ERROR);
+        SysCtlReset();
+        return;
+    }
+
+    uint16_t expected_frame_index = 0;
+
+    /* Loop here until you can get all your characters and stuff */
+    while (1)
+    {
+        uint16_t frame_index;
+        uint16_t frame_message_type;
+        uint16_t frame_length;
+        uint8_t frame_rsa_signature[RSA_SIGNATURE_SIZE];
+
+        // Read frame index
+        rcv = uart_read(UART0, BLOCKING, &read);
+        frame_index = (uint16_t)rcv;
+        rcv = uart_read(UART0, BLOCKING, &read);
+        frame_index |= (uint16_t)rcv << 8;
+
+        // Read message type
+        rcv = uart_read(UART0, BLOCKING, &read);
+        frame_message_type = (uint16_t)rcv;
+        rcv = uart_read(UART0, BLOCKING, &read);
+        frame_message_type |= (uint16_t)rcv << 8;
+
+        // Read frame length
+        rcv = uart_read(UART0, BLOCKING, &read);
+        frame_length = (uint16_t)rcv;
+        rcv = uart_read(UART0, BLOCKING, &read);
+        frame_length |= (uint16_t)rcv << 8;
+
+        // Handle zero-length frame
+        if (frame_length == 0)
+        {
+            uart_write(UART0, OK); // Acknowledge the zero-length frame
+            break; // Exit the loop, finish the update process
+        }
+
+        // Handle other frames
+        if (frame_index != expected_frame_index)
+        {
+            uart_write(UART0, ERROR);
+            SysCtlReset();
+            return;
+        }
+
+        if (frame_message_type != 1)
+        {
+            uart_write(UART0, ERROR);
+            SysCtlReset();
+            return;
+        }
+
+        // Read RSA signature
+        for (int i = 0; i < RSA_SIGNATURE_SIZE; i++)
+        {
+            rcv = uart_read(UART0, BLOCKING, &read);
+            frame_rsa_signature[i] = (uint8_t)rcv;
+        }
+
+        // Read encrypted data
+        unsigned char encrypted_data[FLASH_PAGESIZE];
+        for (int i = 0; i < frame_length; i++)
+        {
+            rcv = uart_read(UART0, BLOCKING, &read);
+            encrypted_data[i] = (uint8_t)rcv;
+        }
+
+        // Verify RSA signature
+        wc_Sha256 sha256;
+        wc_InitSha256(&sha256);
+        wc_Sha256Update(&sha256, encrypted_data, frame_length);
+        wc_Sha256Final(&sha256, hash);
+
+        if (wc_RsaSSL_Verify(hash, sizeof(hash), frame_rsa_signature, sizeof(frame_rsa_signature), &rsa_public_key) != sizeof(hash))
+        {
+            uart_write(UART0, ERROR);
+            SysCtlReset();
+            return;
+        }
+
+        // Decrypt data
+        Aes aes;
+        uint8_t decrypted_data[FLASH_PAGESIZE];
+        wc_AesInit(&aes, NULL, 0);
+        wc_AesCbcDecrypt(&aes, decrypted_data, encrypted_data, frame_length, iv);
+
+        // Write data to flash
+        program_flash((uint8_t *)page_addr, decrypted_data, FLASH_PAGESIZE);
+
+        page_addr += FLASH_PAGESIZE;
+        expected_frame_index++;
+    }
+
+    uart_write(UART0, OK); // Acknowledge the end of the update process
+    boot_firmware();
 }
 
 void boot_firmware(void) {
