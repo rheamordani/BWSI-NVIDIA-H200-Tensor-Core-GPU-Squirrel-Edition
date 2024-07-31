@@ -147,6 +147,7 @@ void load_firmware(void)
     uint32_t data_index = 0;
     uint32_t page_addr = FW_BASE;
     uint32_t version = 0;
+    volatile uint32_t release_message_size = 0;
     uint32_t size = 0;
     uint8_t rsa_signature[256];
     uint8_t iv[16];
@@ -194,6 +195,28 @@ void load_firmware(void)
     {
         // If debug firmware, don't change version
         version = old_version;
+    }
+
+    // // DELETE BEFORE SUBMISSION:
+    // else if (version == old_version){
+    //     version; 
+    // }
+
+    uint8_t iv[16];
+    for (int i = 0; i < 16; i++){
+        rcv = uart_read(UART0, BLOCKING, &read);
+        iv[i] = rcv;
+    }
+
+    rcv = uart_read(UART0, BLOCKING, &read);
+    release_message_size = (uint32_t)rcv;
+    rcv = uart_read(UART0, BLOCKING, &read);
+    release_message_size |= (uint32_t)rcv << 8;
+
+    volatile char encrypted_release_message[release_message_size];
+    for (int i = 0; i < release_message_size; i++){
+        rcv = uart_read(UART0, BLOCKING, &read);
+        encrypted_release_message[i] = rcv;
     }
 
     // Write new firmware size and version to Flash
@@ -391,5 +414,9 @@ void uart_write_hex_bytes(uint8_t uart, uint8_t * start, uint32_t len) {
         uart_write_str(uart, byte_str);
         uart_write_str(uart, " ");
     }
+<<<<<<< HEAD
 }
 
+=======
+}
+>>>>>>> d91b0eeff54bbceec4418da82bb55b2381f658cb
