@@ -39,26 +39,11 @@ ser = serial.Serial("/dev/ttyACM0", 115200)
 
 RESP_OK = b"\x00"
 
-def rsa_sign(firmware):
-    with open('secret_build_output', 'rb') as f:
-        f.seek(16)
-        key = f.read()
-    rsa_priv_key = RSA.import_key(key)
-    h = SHA256.new(firmware)
-    signature = pkcs1_15.new(rsa_priv_key).sign(h)
-    return signature
 
-def send_first_frame(ser, metadata, iv, debug=False):
+def send_first_frame(ser, metadata, iv, hash, release_message, len_rm, debug=False):
     assert(len(metadata) == 4)
     version = u16(metadata[:2], endian='little')
     size = u16(metadata[2:], endian='little')
-    message_type = 0
-
-    # Convert integers to bytes
-    message_type_bytes = p16(message_type, endian='little')  # Assuming little endian for message_type
-    version_bytes = p16(version, endian='little')
-    size_bytes = p16(size, endian='little')
-    rsa_signature = rsa_sign(metadata)
 
     print(f"Version: {version}\nSize: {size} bytes\n")
 
@@ -73,14 +58,40 @@ def send_first_frame(ser, metadata, iv, debug=False):
     # Send size and version to bootloader.
     if debug:
         print(metadata)
-
-    frame = message_type+version+size+iv+rsa_signature
-    ser.write(frame)
-
+    print("trying to receive metadata") 
+    ser.write(metadata + iv + len_rm + release_message + hash)
+    # print(len(metadata + iv + p16(len_rm, endian='little') + release_message + rsa_signature))
+    print(metadata + iv + len_rm + release_message + hash)
     # Wait for an OK from the bootloader.
+    print('waiting for bootloader confirmation')
     resp = ser.read(1)
     if resp != RESP_OK:
         raise RuntimeError("ERROR: Bootloader responded with {}".format(repr(resp)))
+
+    
+    # ser.write(metadata)
+    # resp = ser.read(1)
+    # if resp != RESP_OK:
+    #     raise RuntimeError("ERROR: Bootloader responded with {}".format(repr(resp)))
+
+    # ser.write(iv)
+    # resp = ser.read(1)
+    # if resp != RESP_OK:
+    #     raise RuntimeError("ERROR: Bootloader responded with {}".format(repr(resp)))
+    
+    # ser.write((p16((len_rm), endian = 'little')))
+
+    # ser.write(release_message)
+    # resp = ser.read(1)
+    # if resp != RESP_OK:
+    #     raise RuntimeError("ERROR: Bootloader responded with {}".format(repr(resp)))
+    
+    # ser.write(rsa_signature)
+    # resp = ser.read(1)
+    # if resp != RESP_OK:
+    #     raise RuntimeError("ERROR: Bootloader responded with {}".format(repr(resp)))
+
+    
 
 
 
@@ -104,25 +115,27 @@ def send_frame(ser, frame, debug=False):
 def update(ser, infile, debug):
     # Open firmware file
     with open(infile, "rb") as fp:
-        metadata = fp.read(4)  # Read metadata (version and size)
-        iv = fp.read(16)      # Read initialization vector (IV)
-        firmware = fp.read()  # Read the remaining firmware data
-
-    send_first_frame(ser, metadata, iv, debug=debug)
-    index = 0
-    for idx, frame_start in enumerate(range(0, len(firmware), 100)):
-        # Extract a chunk of firmware data
-        data = firmware[frame_start : frame_start + 100]
-        index += 1
-        message_type = 1
-        frame_length = len(data)
-
-        # Construct the frame with 2-byte index
-        rsa_signature = rsa_sign(p16(index, endian='big') + p16(message_type, endian='big') + p16(frame_length, endian='big') + data)
-        frame = p16(index, endian='big') + p16(message_type, endian='big') + p16(frame_length, endian='big') + rsa_signature + data
-        
-        send_frame(ser, frame, debug=debug)
-        print(f"Wrote frame {idx} ({len(frame)} bytes)")
+        metadata = fp.read(4)
+        iv = fp.read(16)
+        print(iv.hex())
+        metadata_hash = fp.read(256)
+        print(len(metadata_hash))
+        size = u16(metadata[2:], endian='little')
+        num_frames = size // 100
+        if (size % 100 != 0):
+            num_frames += 1
+        firmware = fp.read(size + 256*num_frames + 2*num_frames)
+        release_message_size = fp.read(2)
+        release_message = fp.read()
+        send_first_frame(ser, metadata, iv, metadata_hash, release_message, release_message_size, debug=False)
+        frame_index = 0
+        for i in range(0, size + 256*num_frames + 2*num_frames, 358):
+            frame_index += 1
+            size_firmware = firmware[i: i+2]
+            firmware_to_send = firmware [i+2: i+size]
+            hash = firmware [i+size: i+size+256]
+            frame = p16(frame_index, endian='little') + size_firmware + firmware_to_send + hash
+            send_frame(ser, frame)
 
     print("Done writing firmware.")
 
