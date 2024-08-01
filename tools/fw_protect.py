@@ -17,21 +17,18 @@ from Crypto.Hash import SHA256
 from Crypto.Util.Padding import pad, unpad
 
 iv = get_random_bytes(16)
+print(iv.hex())
 def aes_encrypt(firmware):
     with open('secret_build_output', 'rb') as f:
         aes_key = f.read(32)
+        print(aes_key.hex())
     cipher = AES.new(aes_key, AES.MODE_CBC, iv=iv)
     ciphertext = cipher.encrypt(pad(firmware, 16))
     return ciphertext
 
-def rsa_sign(firmware):
-    with open('secret_build_output', 'rb') as f:
-        f.seek(32)
-        key = f.read()
-    rsa_priv_key = RSA.import_key(key)
-    h = SHA256.new(firmware)
-    signature = pkcs1_15.new(rsa_priv_key).sign(h)
-    return signature
+def hash(firmware):
+    h = SHA256.new()
+    
 
 def protect_firmware(infile, outfile, version, message):
     # Load firmware binary from infile
@@ -52,10 +49,10 @@ def protect_firmware(infile, outfile, version, message):
     # Write firmware blob to outfile
     with open(outfile, "wb+") as outfile:
         release_message_ciphertext = aes_encrypt(message.encode())
-        print(release_message_ciphertext)
+        release_message_size = len(message.encode())
+        firmware_blob += p16(release_message_size, endian = 'little')
         firmware_blob += release_message_ciphertext
         outfile.write(firmware_blob)
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Firmware Update Tool")
