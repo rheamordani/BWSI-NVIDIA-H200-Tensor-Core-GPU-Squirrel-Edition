@@ -203,33 +203,30 @@ void load_firmware(void) {
     program_flash((uint8_t *) METADATA_BASE, (uint8_t *)(&metadata), 4);
 
     Aes dec;
-    int ret;
-    wc_AesInit(&dec, NULL, INVALID_DEVID);
+    volatile int ret;
+    ret = wc_AesInit(&dec, NULL, INVALID_DEVID);
 
     // Set the IV
     ret = wc_AesSetIV(&dec, iv);
-    if (ret != 0) {
-        uart_write(UART0, ERROR); // Reject the metadata.
-        SysCtlReset();            // Reset device
-    }
 
     // Set the key for decryption
     char decrypted_release_message[release_message_size];
-    ret = wc_AesSetKey(&dec, aes_key, 32, iv, AES_DECRYPTION);
-    if (ret != 0) {
-        uart_write(UART0, ERROR); // Reject the metadata.
-        SysCtlReset();            // Reset device
+    for (int i = 0; i < 16; i++){
+        decrypted_release_message[i] = 1;
     }
+    wc_AesSetKey(&dec, aes_key, 32, iv, AES_DECRYPTION);
 
     // Perform decryption
     ret = wc_AesCbcDecrypt(&dec, decrypted_release_message, encrypted_release_message, release_message_size);
     if (ret != 0) {
-        uart_write(UART0, ERROR); // Reject the metadata.
-        SysCtlReset();            // Reset device
+        uart_write(UART0, ERROR);
+        SysCtlReset();
     }
 
     wc_AesFree(&dec);
 
+
+    // good
     RsaKey pub;
     wc_InitRsaKey(&pub, NULL);
     int i = 0;

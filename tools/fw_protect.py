@@ -28,7 +28,8 @@ def aes_encrypt(firmware):
 
 def hash(firmware):
     h = SHA256.new()
-    
+    h.update(firmware)
+    return h.digest()
 
 def protect_firmware(infile, outfile, version, message):
     # Load firmware binary from infile
@@ -38,13 +39,12 @@ def protect_firmware(infile, outfile, version, message):
     firmware = aes_encrypt(firmware)
     # pack metadata
     metadata = p16(version, endian='little') + p16(len(firmware), endian='little')
-    # write metadata, iv, and rsa signt
-    firmware_blob = metadata + iv + rsa_sign(metadata)
-    print(len(rsa_sign(metadata)))
+    firmware_blob = metadata + iv + hash(metadata)
+    print(len(hash(metadata)))
     frames = [firmware[i:i + 100] for i in range(0, len(firmware), 100)]
     for frame in frames:
-        rsa_signature = rsa_sign(frame)
-        frame_to_send = p16(len(frame), endian = 'little') + frame + rsa_signature
+        frame_hash = hash(frame)
+        frame_to_send = p16(len(frame), endian = 'little') + frame + frame_hash
         firmware_blob += frame_to_send
     # Write firmware blob to outfile
     with open(outfile, "wb+") as outfile:
