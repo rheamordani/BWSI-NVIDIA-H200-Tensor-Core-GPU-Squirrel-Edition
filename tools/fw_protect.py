@@ -16,14 +16,13 @@ from Crypto.Signature import pkcs1_15
 from Crypto.Hash import SHA256
 from Crypto.Util.Padding import pad, unpad
 
-
+iv = get_random_bytes(16)
 def aes_encrypt(firmware):
     with open('secret_build_output', 'rb') as f:
         aes_key = f.read(32)
-    iv = get_random_bytes(16)
     cipher = AES.new(aes_key, AES.MODE_CBC, iv=iv)
     ciphertext = cipher.encrypt(pad(firmware, 16))
-    return ciphertext, iv
+    return ciphertext
 
 def rsa_sign(firmware):
     with open('secret_build_output', 'rb') as f:
@@ -39,9 +38,7 @@ def protect_firmware(infile, outfile, version, message):
     with open(infile, "rb") as fp:
         firmware = fp.read()
     # encrypt firmware
-    aes_output = aes_encrypt(firmware)
-    firmware = aes_output[0]
-    iv = aes_output[1]
+    firmware = aes_encrypt(firmware)
     # pack metadata
     metadata = p16(version, endian='little') + p16(len(firmware), endian='little')
     # write metadata, iv, and rsa signt
@@ -54,8 +51,7 @@ def protect_firmware(infile, outfile, version, message):
         firmware_blob += frame_to_send
     # Write firmware blob to outfile
     with open(outfile, "wb+") as outfile:
-        aes_output = aes_encrypt(message.encode())
-        release_message_ciphertext = aes_output[0]
+        release_message_ciphertext = aes_encrypt(message.encode())
         print(release_message_ciphertext)
         firmware_blob += release_message_ciphertext
         outfile.write(firmware_blob)
