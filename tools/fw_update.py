@@ -40,7 +40,8 @@ ser = serial.Serial("/dev/ttyACM0", 115200)
 RESP_OK = b"\x00"
 
 
-def send_first_frame(ser, metadata, iv, hash, release_message, len_rm, debug=False):
+def send_first_frame(ser, begin_frame, debug=False):
+    metadata = begin_frame [:4]
     assert(len(metadata) == 4)
     version = u16(metadata[:2], endian='little')
     size = u16(metadata[2:], endian='little')
@@ -58,45 +59,26 @@ def send_first_frame(ser, metadata, iv, hash, release_message, len_rm, debug=Fal
     # Send size and version to bootloader.
     if debug:
         print(metadata)
-    print("trying to receive metadata") 
-    ser.write(metadata + iv + len_rm + release_message + hash)
-    # print(len(metadata + iv + p16(len_rm, endian='little') + release_message + rsa_signature))
-    print(metadata + iv + len_rm + release_message + hash)
+
+    print('begin frame: ')
+    print_hex(begin_frame)
+    print(f'length of frame 0: {len(begin_frame)}')
+
+    ser.write(begin_frame)
     # Wait for an OK from the bootloader.
     print('waiting for bootloader confirmation')
     resp = ser.read(1)
     if resp != RESP_OK:
-        raise RuntimeError("ERROR: Bootloader responded with {}".format(repr(resp)))
-
-    
-    # ser.write(metadata)
-    # resp = ser.read(1)
-    # if resp != RESP_OK:
-    #     raise RuntimeError("ERROR: Bootloader responded with {}".format(repr(resp)))
-
-    # ser.write(iv)
-    # resp = ser.read(1)
-    # if resp != RESP_OK:
-    #     raise RuntimeError("ERROR: Bootloader responded with {}".format(repr(resp)))
-    
-    # ser.write((p16((len_rm), endian = 'little')))
-
-    # ser.write(release_message)
-    # resp = ser.read(1)
-    # if resp != RESP_OK:
-    #     raise RuntimeError("ERROR: Bootloader responded with {}".format(repr(resp)))
-    
-    # ser.write(rsa_signature)
-    # resp = ser.read(1)
-    # if resp != RESP_OK:
-    #     raise RuntimeError("ERROR: Bootloader responded with {}".format(repr(resp)))
-
-    
+        raise RuntimeError("ERROR: Bootloader responded with {}".format(repr(resp)))    
 
 
 
 def send_frame(ser, frame, debug=False):
     ser.write(frame)  # Write the frame...
+
+    print('data frame: ')
+    print_hex(frame)
+    print(f'length of frame: {len(frame)}')
 
     if debug:
         print_hex(frame)
@@ -115,33 +97,29 @@ def send_frame(ser, frame, debug=False):
 def update(ser, infile, debug):
     # Open firmware file
     with open(infile, "rb") as fp:
-        metadata = fp.read(4)
-        iv = fp.read(16)
-        print(iv.hex())
-        metadata_hash = fp.read(256)
-        print(len(metadata_hash))
-        size = u16(metadata[2:], endian='little')
-        num_frames = size // 100
-        if (size % 100 != 0):
-            num_frames += 1
-        firmware = fp.read(size + 256*num_frames + 2*num_frames)
-        release_message_size = fp.read(2)
-        release_message = fp.read()
-        send_first_frame(ser, metadata, iv, metadata_hash, release_message, release_message_size, debug=False)
-        frame_index = 0
-        for i in range(0, size + 256*num_frames + 2*num_frames, 358):
-            frame_index += 1
-            size_firmware = firmware[i: i+2]
-            firmware_to_send = firmware [i+2: i+size]
-            hash = firmware [i+size: i+size+256]
-            frame = p16(frame_index, endian='little') + size_firmware + firmware_to_send + hash
-            send_frame(ser, frame)
+        full_file = fp.read()
+
+    begin_frame = full_file [:52]
+
+    send_first_frame (ser, begin_frame)
+    
+    data_frames = full_file [52 : ]
+    print(data_frames)
+
+    # release_message_and_null_terminator = full_file [size + 32*num_frames + 2*num_frames: ]
+
+    frames = [data_frames[i : i + 272] for i in range(0, len(data_frames), 272)]
+
+    for frame in frames:
+        send_frame(ser, frame)
 
     print("Done writing firmware.")
 
     # Send a zero length payload to signal the bootloader to finish writing the page
     ser.write(p16(0x0000, endian='big'))
-    resp = ser.read(1)
+    # ser.write(release_message_and_null_terminator)
+
+    resp = ser.read(1)  # Wait for an OK from the bootloader
     if resp != RESP_OK:
         raise RuntimeError("ERROR: Bootloader responded to zero length frame with {}".format(repr(resp)))
     print(f"Wrote zero length frame (2 bytes)")
