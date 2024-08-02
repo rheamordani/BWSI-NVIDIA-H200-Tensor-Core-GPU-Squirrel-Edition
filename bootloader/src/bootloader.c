@@ -23,6 +23,8 @@
 #include "wolfssl/wolfcrypt/aes.h"
 #include "wolfssl/wolfcrypt/sha.h"
 #include "wolfssl/wolfcrypt/rsa.h"
+#include "/home/hacker/NVIDIA-H200-Tensor-Core-GPU-Squirrel-Edition/bootloader/inc/keys.h"
+
 
 // Forward Declarations
 void load_firmware(void);
@@ -38,7 +40,7 @@ void uart_write_hex_bytes(uint8_t, uint8_t *, uint32_t);
 #define FLASH_WRITESIZE 4
 
 // Protocol Constants
-#define OK ((unsigned char)0x00)
+#define OK ((unsigned char)0x04)
 #define ERROR ((unsigned char)0x01)
 #define UPDATE ((unsigned char)'U')
 #define BOOT ((unsigned char)'B')
@@ -214,26 +216,57 @@ void load_firmware(void) {
     /* Loop here until you can get all your characters and stuff */
     while (1) {
         // Get two bytes for the length.
-        rcv = uart_read(UART0, BLOCKING, &read);
-        firmware_size = (uint32_t)rcv;
-        rcv = uart_read(UART0, BLOCKING, &read);
-        firmware_size |= (uint32_t)rcv << 8;
+        volatile uint8_t fw_buffer [256];
+        volatile uint8_t firmware_hash [32];
 
-        uint8_t fw_buffer [272];
-
-        for (int i = 0; i < fw_buffer; i++){
+        for (int i = 0; i < 256; i++){
             fw_buffer [i] = uart_read(UART0, BLOCKING, &read);
         }
+        for (int i = 0; i < 32; i++){
+            firmware_hash [i] = uart_read(UART0, BLOCKING, &read);
+        }
 
-        
 
-        // Get the number of bytes specified
-        for (int i = 0; i < firmware_size; ++i) {
+        Aes dec;
+        volatile int ret;
+        wc_AesInit(&dec, NULL, INVALID_DEVID);
+
+        // Set the IV
+        wc_AesSetIV(&dec, iv);
+
+        // Set the key for decryption
+        volatile char decrypted_firmware[256];
+        for (int i = 0; i < 16; i++){
+            decrypted_firmware[i] = 1;
+        }
+
+        wc_AesSetKey(&dec, aes_key, 32, iv, AES_DECRYPTION);
+
+        // Perform decryption
+        ret = wc_AesCbcDecrypt(&dec, decrypted_firmware, fw_buffer, 256);
+        if (ret != 0){
+            uart_write(UART0, ERROR); // Reject the firmware
+            SysCtlReset();            // Reset device
+            return;
+        }
+
+
+         uint8_t size_medata = sizeof(metadata);
+        // byte data[size]; 
+        // memcpy(data, metadata, size);
+        byte metadata_decrypted_hash[32];
+        wc_Sha256Hash(metadata, size_medata, metadata_decrypted_hash); // Hash it
+        if (metadata_hash != metadata_decrypted_hash){
+            uart_write(UART0, ERROR); // Reject the firmware
+            SysCtlReset();            // Reset device
+            return;
+        }
+
+
+        for (int i = 0; i < 256; ++i) {
             data[data_index] = fw_buffer[i];
             data_index += 1;
         } // for
-
-        uart_write(UART0, OK); // Acknowledge the metadata.
 
         // If we filed our page buffer, program it
         if (data_index == FLASH_PAGESIZE || firmware_size == 0) {

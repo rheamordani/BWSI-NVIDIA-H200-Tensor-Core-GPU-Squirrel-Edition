@@ -37,7 +37,7 @@ from Crypto.Util.Padding import pad, unpad
 
 ser = serial.Serial("/dev/ttyACM0", 115200)
 
-RESP_OK = b"\x00"
+RESP_OK = b"\x04"
 
 
 def send_first_frame(ser, begin_frame, debug=False):
@@ -56,7 +56,7 @@ def send_first_frame(ser, begin_frame, debug=False):
         print("got a byte")
         pass
 
-    # Send size and version to bootloader.
+    #    Send size and version to bootloader.
     if debug:
         print(metadata)
 
@@ -103,15 +103,20 @@ def update(ser, infile, debug):
 
     send_first_frame (ser, begin_frame)
     
-    data_frames = full_file [52 : ]
+    data_frames = full_file [52:]
     print(data_frames)
 
     # release_message_and_null_terminator = full_file [size + 32*num_frames + 2*num_frames: ]
 
-    frames = [data_frames[i : i + 272] for i in range(0, len(data_frames), 272)]
+    frames = [data_frames[i : i + 288] for i in range(0, len(data_frames), 288)]
 
     for frame in frames:
         send_frame(ser, frame)
+        resp = ser.read(1)  # Wait for an OK from the bootloader
+        time.sleep(0.1)
+        if resp != RESP_OK:
+            raise RuntimeError("ERROR: Bootloader responded with {}".format(repr(resp)))
+
 
     print("Done writing firmware.")
 

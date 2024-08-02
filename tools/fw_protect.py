@@ -15,13 +15,14 @@ from Crypto.Cipher import AES
 from Crypto.Signature import pkcs1_15
 from Crypto.Hash import SHA256
 from Crypto.Util.Padding import pad, unpad
+from util import *
 
 iv = get_random_bytes(16)
 def aes_encrypt(firmware):
     with open('secret_build_output', 'rb') as f:
         aes_key = f.read(32)
     cipher = AES.new(aes_key, AES.MODE_CBC, iv=iv)
-    ciphertext = cipher.encrypt(pad(firmware, 16))
+    ciphertext = cipher.encrypt(firmware)
     return ciphertext
 
 def sha256_hash(firmware):
@@ -48,11 +49,18 @@ def protect_firmware(infile, outfile, version, message):
     frames = [firmware[i : i + 256] for i in range(0, len(firmware), 256)]
     # print(frames)
     for frame in frames:
+        if len(frame)!= 256:
+            while True:
+                frame = frame + b'0'
+                if len(frame) == 256:
+                    break
+        firmware_hash = sha256_hash(frame)
         encrypted_firmware = aes_encrypt(frame)
         firmware_hash = sha256_hash(encrypted_firmware)
-        print(len(encrypted_firmware))
-        frame_to_send = p16(len(encrypted_firmware), endian = 'little') + encrypted_firmware + firmware_hash
-        print(frame_to_send)
+        print_hex(firmware_hash)
+        print(f'length of enc firmware:  {len(encrypted_firmware)}')
+        frame_to_send = encrypted_firmware + firmware_hash
+        print(f'len of frame to send: {len(frame_to_send)}')
         firmware_blob += frame_to_send
 
     # Write firmware blob to outfile
