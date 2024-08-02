@@ -213,65 +213,27 @@ void load_firmware(void) {
 
     /* Loop here until you can get all your characters and stuff */
     while (1) {
-        data_index = 0;
         // Get two bytes for the length.
         rcv = uart_read(UART0, BLOCKING, &read);
         firmware_size = (uint32_t)rcv;
         rcv = uart_read(UART0, BLOCKING, &read);
         firmware_size |= (uint32_t)rcv << 8;
 
+        uint8_t fw_buffer [272];
+
+        for (int i = 0; i < fw_buffer; i++){
+            fw_buffer [i] = uart_read(UART0, BLOCKING, &read);
+        }
+
+        
+
         // Get the number of bytes specified
-        for (int i = 0; i < firmware_size; i++) {
-            data[data_index] = uart_read(UART0, BLOCKING, &read);
+        for (int i = 0; i < firmware_size; ++i) {
+            data[data_index] = fw_buffer[i];
             data_index += 1;
         } // for
 
-
-        // get hash of decrypted firmware frame
-        volatile byte firmware_hash[32];
-        for (int i = 0; i < 32; ++i) {
-            firmware_hash[i] = uart_read(UART0, BLOCKING, &read);
-        } // for
-
-        Aes dec;
-        volatile int ret;
-        ret = wc_AesInit(&dec, NULL, INVALID_DEVID);
-
-        // Set the IV
-        ret = wc_AesSetIV(&dec, iv);
-
-        // Set the key for decryption
-        char decypted_release_message[release_message_size];
-        for (int i = 0; i < 16; i++){
-            decypted_release_message[i] = 1;
-        }
-
-        wc_AesSetKey(&dec, aes_key, 32, iv, AES_DECRYPTION);
-
-        // Perform decryption
-        ret = wc_AesCbcDecrypt(&dec, decypted_release_message, encrypted_release_message, release_message_size);
-
-        char decrypted_release_message[release_message_size];
-        
-
-        if (ret != 0) {
-            uart_write(UART0, ERROR);
-            SysCtlReset();
-        }
-        wc_AesFree(&dec);
-
-        uint8_t size_medata = sizeof(metadata);
-        // byte data[size]; 
-        // memcpy(data, metadata, size);
-        byte metadata_decrypted_hash[32];
-        wc_Sha256Hash(metadata, size_medata, metadata_decrypted_hash); // Hash it
-        if (metadata_hash != metadata_decrypted_hash){
-            reject();
-        }
-
         uart_write(UART0, OK); // Acknowledge the metadata.
-
-
 
         // If we filed our page buffer, program it
         if (data_index == FLASH_PAGESIZE || firmware_size == 0) {

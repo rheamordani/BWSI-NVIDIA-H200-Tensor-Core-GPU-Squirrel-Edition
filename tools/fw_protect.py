@@ -48,8 +48,8 @@ def protect_firmware(infile, outfile, version, message):
     frames = [firmware[i : i + 256] for i in range(0, len(firmware), 256)]
     # print(frames)
     for frame in frames:
-        firmware_hash = sha256_hash(frame)
         encrypted_firmware = aes_encrypt(frame)
+        firmware_hash = sha256_hash(encrypted_firmware)
         print(len(encrypted_firmware))
         frame_to_send = p16(len(encrypted_firmware), endian = 'little') + encrypted_firmware + firmware_hash
         print(frame_to_send)
