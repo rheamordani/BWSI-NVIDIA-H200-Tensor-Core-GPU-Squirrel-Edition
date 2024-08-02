@@ -669,4 +669,3 @@ extern unsigned int my_rng_seed_gen(void);
 #endif
 
 #endif /* WOLFSSL_USER_SETTINGS_H */
-

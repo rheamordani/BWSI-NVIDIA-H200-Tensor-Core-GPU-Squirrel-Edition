@@ -25,7 +25,6 @@
 #include "wolfssl/wolfcrypt/rsa.h"
 #include "/home/hacker/NVIDIA-H200-Tensor-Core-GPU-Squirrel-Edition/bootloader/inc/keys.h"
 
-
 // Forward Declarations
 void load_firmware(void);
 void boot_firmware(void);
@@ -214,62 +213,62 @@ void load_firmware(void) {
     uart_write(UART0, OK); // Acknowledge the metadata.
 
     /* Loop here until you can get all your characters and stuff */
+    uint8_t size_firmware = 256;
+    byte decrypted_firmware_hash[32];
+    uint8_t fw_buffer [256];
+    uint8_t firmware_hash [32];
+
     while (1) {
         // Get two bytes for the length.
-        volatile uint8_t fw_buffer [256];
-        volatile uint8_t firmware_hash [32];
-
-        for (int i = 0; i < 256; i++){
+        for (int i = 0; i < 2; i++){
             fw_buffer [i] = uart_read(UART0, BLOCKING, &read);
         }
-        for (int i = 0; i < 32; i++){
-            firmware_hash [i] = uart_read(UART0, BLOCKING, &read);
+        if (fw_buffer[0] == 0 && fw_buffer[1] == 0){
+            size_firmware = 0;
+        }else{
+            for (int i = 2; i < 256; i++){
+                fw_buffer [i] = uart_read(UART0, BLOCKING, &read);
+            }
+            for (int i = 0; i < 32; i++){
+                firmware_hash [i] = uart_read(UART0, BLOCKING, &read);
+            }
+            Aes dec;
+            volatile int ret;
+            wc_AesInit(&dec, NULL, INVALID_DEVID);
+
+            // Set the IV
+            wc_AesSetIV(&dec, iv);
+
+            // Set the key for decryption
+            char decrypted_firmware[256];
+            for (int i = 0; i < 256; i++){
+                decrypted_firmware[i] = 1;
+            }
+
+            wc_AesSetKey(&dec, aes_key, 32, iv, AES_DECRYPTION);
+
+            // Perform decryption
+            ret = wc_AesCbcDecrypt(&dec, decrypted_firmware, fw_buffer, 256);
+            if (ret != 0){
+                uart_write(UART0, ERROR); // Reject the firmware
+                SysCtlReset();            // Reset device
+                return;
+            }
+
+            
+            wc_Sha256Hash(decrypted_firmware, size_firmware, decrypted_firmware_hash); // Hash it
+            if (firmware_hash != decrypted_firmware_hash){
+                uart_write(UART0, ERROR); // Reject the firmware
+                SysCtlReset();            // Reset device
+                return;
+            }
+
+            for (int i = 0; i < 256; ++i) {
+                data[data_index] = fw_buffer[i];
+                data_index += 1;
+            } // for
         }
-
-
-        Aes dec;
-        volatile int ret;
-        wc_AesInit(&dec, NULL, INVALID_DEVID);
-
-        // Set the IV
-        wc_AesSetIV(&dec, iv);
-
-        // Set the key for decryption
-        volatile char decrypted_firmware[256];
-        for (int i = 0; i < 16; i++){
-            decrypted_firmware[i] = 1;
-        }
-
-        wc_AesSetKey(&dec, aes_key, 32, iv, AES_DECRYPTION);
-
-        // Perform decryption
-        ret = wc_AesCbcDecrypt(&dec, decrypted_firmware, fw_buffer, 256);
-        if (ret != 0){
-            uart_write(UART0, ERROR); // Reject the firmware
-            SysCtlReset();            // Reset device
-            return;
-        }
-
-
-         uint8_t size_medata = sizeof(metadata);
-        // byte data[size]; 
-        // memcpy(data, metadata, size);
-        byte metadata_decrypted_hash[32];
-        wc_Sha256Hash(metadata, size_medata, metadata_decrypted_hash); // Hash it
-        if (metadata_hash != metadata_decrypted_hash){
-            uart_write(UART0, ERROR); // Reject the firmware
-            SysCtlReset();            // Reset device
-            return;
-        }
-
-
-        for (int i = 0; i < 256; ++i) {
-            data[data_index] = fw_buffer[i];
-            data_index += 1;
-        } // for
-
-        // If we filed our page buffer, program it
-        if (data_index == FLASH_PAGESIZE || firmware_size == 0) {
+        if (data_index == FLASH_PAGESIZE || size_firmware == 0) {
             // Try to write flash and check for error
             if (program_flash((uint8_t *) page_addr, data, data_index)) {
                 uart_write(UART0, ERROR); // Reject the firmware
@@ -282,7 +281,7 @@ void load_firmware(void) {
             data_index = 0;
 
             // If at end of firmware, go to main
-            if (firmware_size == 0) {
+            if (size_firmware == 0) {
                 uart_write(UART0, OK);
                 break;
             }
