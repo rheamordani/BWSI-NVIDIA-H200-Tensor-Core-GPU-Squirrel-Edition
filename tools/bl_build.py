@@ -30,7 +30,7 @@ def generate_keys(): #gnerating keys
     with open('secret_build_output', 'wb') as f: #writing keys to secret file
         f.write(aes_key)
         f.write(rsa_private_key)
-    with open('/home/hacker/NVIDIA-H200-Tensor-Core-GPU-Squirrel-Edition/bootloader/inc/keys.h', 'w') as f: #writing keys to header file
+    with open('', 'w') as f: #writing keys to header file
         aes_key_hex = aes_key.hex()
         rsa_public_key_hex = rsa_public_key.hex()
         f.write(f"#define AES_KEY 0x{aes_key_hex}\n")
