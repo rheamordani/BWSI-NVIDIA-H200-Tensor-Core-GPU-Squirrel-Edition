@@ -23,6 +23,7 @@
 #include "wolfssl/wolfcrypt/aes.h"
 #include "wolfssl/wolfcrypt/sha.h"
 #include "wolfssl/wolfcrypt/rsa.h"
+#include "/home/hacker/blink_minimal/NVIDIA-H200-Tensor-Core-GPU-Squirrel-Edition/bootloader/inc/keys.h"
 
 // Forward Declarations
 void load_firmware(void);
@@ -42,6 +43,8 @@ void uart_write_hex_bytes(uint8_t, uint8_t *, uint32_t);
 #define ERROR ((unsigned char)0x01)
 #define UPDATE ((unsigned char)'U')
 #define BOOT ((unsigned char)'B')
+
+#define KEY ""
 
 // Device metadata
 uint16_t * fw_version_address = (uint16_t *)METADATA_BASE;
@@ -115,6 +118,12 @@ int main(void) {
 }
 
 
+void reject(void){
+    uart_write(UART0, ERROR);
+    SysCtlReset();
+    return;
+}
+
  /*
  * Load the firmware into flash.
  */
@@ -126,7 +135,11 @@ void load_firmware(void) {
     uint32_t data_index = 0;
     uint32_t page_addr = FW_BASE;
     uint32_t version = 0;
+    uint32_t release_message_size = 0;
     uint32_t size = 0;
+
+    uint32_t expected_frame_index = 0;
+    uint32_t frame_index = 0;
 
     // Get version.
     rcv = uart_read(UART0, BLOCKING, &read);
@@ -140,8 +153,39 @@ void load_firmware(void) {
     rcv = uart_read(UART0, BLOCKING, &read);
     size |= (uint32_t)rcv << 8;
 
+
     // Compare to old version and abort if older (note special case for version 0).
     // If no metadata available (0xFFFF), accept version 1
+
+    uint8_t iv[16];
+    for (int i = 0; i < 16; i++){
+        rcv = uart_read(UART0, BLOCKING, &read);
+        iv[i] = rcv;
+    }
+
+
+    rcv = uart_read(UART0, BLOCKING, &read);
+    release_message_size = (uint32_t)rcv;
+    rcv = uart_read(UART0, BLOCKING, &read);
+    release_message_size |= (uint32_t)rcv << 8;
+
+    char encrypted_release_message[release_message_size];
+    for (int i = 0; i < release_message_size; i++){
+        rcv = uart_read(UART0, BLOCKING, &read);
+        encrypted_release_message[i] = (char) rcv;
+    }
+
+    // Write new firmware size and version to Flash
+    // Create 32 bit word for flash programming, version is at lower address, size is at higher address
+
+    uint8_t metadata_rsa_signature [256];
+    volatile uint32_t loop_count = 0;
+    for (int i = 0; i < 256; i++){
+        loop_count += 1;
+        rcv = uart_read(UART0, BLOCKING, &read);
+        metadata_rsa_signature[i] = (uint8_t)rcv;
+    }
+
     uint16_t old_version = *fw_version_address;
     if (old_version == 0xFFFF) {
         old_version = 1;
@@ -156,13 +200,22 @@ void load_firmware(void) {
         version = old_version;
     }
 
-    // Write new firmware size and version to Flash
-    // Create 32 bit word for flash programming, version is at lower address, size is at higher address
+
     uint32_t metadata = ((size & 0xFFFF) << 16) | (version & 0xFFFF);
     program_flash((uint8_t *) METADATA_BASE, (uint8_t *)(&metadata), 4);
 
-    uart_write(UART0, OK); // Acknowledge the metadata.
+    Aes dec;
+    int ret;
+    wc_AesFree(&dec);
 
+    if(ret == 0){
+        uart_write_str(UART0, "Successfully Verified Signature!\n");
+    }else{
+        uart_write_str(UART0, "ERROR");
+        reject();
+    }
+    uart_write(UART0, OK); // Acknowledge the metadata.
+    
     /* Loop here until you can get all your characters and stuff */
     while (1) {
 
@@ -177,6 +230,35 @@ void load_firmware(void) {
             data[data_index] = uart_read(UART0, BLOCKING, &read);
             data_index += 1;
         } // for
+
+        uint16_t firm_size = 0;
+        uint16_t sign = 0;
+        //int n = sizeof(metadata) / sizeof(metadata[0]);
+        //uint16_t size = u16(metadata[n - 2], endian='little');
+
+        int num_frames = floor(size/100);
+        // for (int i = 0; i < frame_length; i++) {
+        //     firm_size = firmware[i: i+2];
+        //     sign = firmware [i+size: i+size+256];
+        // }
+        
+        // decrypt frames
+        wc_AesInit(&dec, NULL, INVALID_DEVID);
+
+        // Set the key for decryption
+        char decrypted_release_message[release_message_size];
+        ret = wc_AesSetKey(&dec, KEY, 32, iv, AES_DECRYPTION);
+        if (ret != 0) {
+            uart_write(UART0, ERROR); // Reject the metadata.
+            SysCtlReset();            // Reset device
+        }
+
+        // Perform decryption
+        ret = wc_AesCbcDecrypt(&dec, decrypted_release_message, encrypted_release_message, release_message_size);
+        if (ret != 0) {
+            uart_write(UART0, ERROR); // Reject the metadata.
+            SysCtlReset();            // Reset device
+        }
 
         // If we filed our page buffer, program it
         if (data_index == FLASH_PAGESIZE || frame_length == 0) {
