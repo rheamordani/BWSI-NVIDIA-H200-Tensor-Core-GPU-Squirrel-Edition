@@ -39,12 +39,13 @@ void uart_write_hex_bytes(uint8_t, uint8_t *, uint32_t);
 #define FLASH_WRITESIZE 4
 
 // Protocol Constants
-#define OK ((unsigned char)0x04)
+#define OK ((unsigned char)0x00)
 #define ERROR ((unsigned char)0x01)
 #define UPDATE ((unsigned char)'U')
 #define BOOT ((unsigned char)'B')
 
 #define IV_SIZE 16
+#define FIRMWARE_SIZE 16
 
 // Device metadata
 uint16_t * fw_version_address = (uint16_t *)METADATA_BASE;
@@ -160,7 +161,7 @@ void load_firmware(void) {
     size |= (uint32_t)rcv << 8;
 
     // Get IV used for AES CBC
-    for (int j = 0; j < 16; j++) {
+    for (int j = 0; j < FIRMWARE_SIZE; j++) {
         rcv = uart_read(UART0, BLOCKING, &read);
         iv [j] = (uint8_t)rcv;
     }
@@ -213,10 +214,10 @@ void load_firmware(void) {
     uart_write(UART0, OK); // Acknowledge the metadata.
 
     /* Loop here until you can get all your characters and stuff */
-    uint8_t size_firmware = 256;
+    volatile uint32_t size_firmware = 256;
     byte decrypted_firmware_hash[32];
-    uint8_t fw_buffer [256];
-    uint8_t firmware_hash [32];
+    uint8_t fw_buffer [FIRMWARE_SIZE];
+    volatile firmware_hash [32];
 
     while (1) {
         // Get two bytes for the length.
@@ -226,12 +227,13 @@ void load_firmware(void) {
         if (fw_buffer[0] == 0 && fw_buffer[1] == 0){
             size_firmware = 0;
         }else{
-            for (int i = 2; i < 256; i++){
+            for (int i = 2; i < 16; i++){
                 fw_buffer [i] = uart_read(UART0, BLOCKING, &read);
             }
             for (int i = 0; i < 32; i++){
                 firmware_hash [i] = uart_read(UART0, BLOCKING, &read);
             }
+
             Aes dec;
             volatile int ret;
             wc_AesInit(&dec, NULL, INVALID_DEVID);
@@ -240,34 +242,44 @@ void load_firmware(void) {
             wc_AesSetIV(&dec, iv);
 
             // Set the key for decryption
-            char decrypted_firmware[256];
-            for (int i = 0; i < 256; i++){
+            char decrypted_firmware[FIRMWARE_SIZE];
+            for (int i = 0; i < FIRMWARE_SIZE; i++){
                 decrypted_firmware[i] = 1;
             }
 
             wc_AesSetKey(&dec, aes_key, 32, iv, AES_DECRYPTION);
 
             // Perform decryption
-            ret = wc_AesCbcDecrypt(&dec, decrypted_firmware, fw_buffer, 256);
+            ret = wc_AesCbcDecrypt(&dec, decrypted_firmware, fw_buffer, FIRMWARE_SIZE);
             if (ret != 0){
                 uart_write(UART0, ERROR); // Reject the firmware
                 SysCtlReset();            // Reset device
                 return;
             }
 
+            uint8_t firmware_received_hash[32];
+            wc_Sha256 sha;
+            wc_InitSha256(&sha);
+            wc_Sha256Update(&sha, (const byte*)decrypted_firmware, sizeof(decrypted_firmware));
+            wc_Sha256Final(&sha, firmware_received_hash);
             
-            wc_Sha256Hash(decrypted_firmware, size_firmware, decrypted_firmware_hash); // Hash it
-            if (firmware_hash != decrypted_firmware_hash){
+            // Compute hash of the decrypted firmware
+            uint8_t expected_hash[32];
+            wc_Sha256Hash(decrypted_firmware, sizeof(decrypted_firmware), expected_hash);
+
+            // Compare the computed hash with the received hash
+            if (memcmp(firmware_received_hash, expected_hash, sizeof(firmware_received_hash)) != 0) {
                 uart_write(UART0, ERROR); // Reject the firmware
                 SysCtlReset();            // Reset device
                 return;
             }
 
-            for (int i = 0; i < 256; ++i) {
+            for (int i = 0; i < FIRMWARE_SIZE; ++i) {
                 data[data_index] = fw_buffer[i];
                 data_index += 1;
             } // for
         }
+
         if (data_index == FLASH_PAGESIZE || size_firmware == 0) {
             // Try to write flash and check for error
             if (program_flash((uint8_t *) page_addr, data, data_index)) {

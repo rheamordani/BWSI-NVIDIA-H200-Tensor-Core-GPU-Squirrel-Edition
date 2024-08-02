@@ -40,19 +40,19 @@ def protect_firmware(infile, outfile, version, message):
     
     # hash metadata
     metadata_hash = sha256_hash(metadata)
-
+    
     begin_frame = metadata + iv + metadata_hash
 
     firmware_blob = begin_frame
 
     # append frames of encrypted firmware with the hash of the decrypted_data   
-    frames = [firmware[i : i + 256] for i in range(0, len(firmware), 256)]
+    frames = [firmware[i : i + 16] for i in range(0, len(firmware), 16)]
     # print(frames)
     for frame in frames:
-        if len(frame)!= 256:
+        if len(frame)!= 16:
             while True:
                 frame = frame + b'0'
-                if len(frame) == 256:
+                if len(frame) == 16:
                     break
         firmware_hash = sha256_hash(frame)
         encrypted_firmware = aes_encrypt(frame)
