@@ -26,7 +26,7 @@ def generate_keys():
     aes_key = get_random_bytes(32)
     with open('secret_build_output', 'wb') as f:
         f.write(aes_key)
-    with open('/home/hacker/NVIDIA-H200-Tensor-Core-GPU-Squirrel-Edition/bootloader/inc/keys.h', 'w') as f:
+    with open('bootloader/inc/keys.h', 'w') as f:
         bytes_array = ""
         for i in range(len(aes_key)):
             if i == len(aes_key) - 1:
