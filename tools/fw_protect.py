@@ -51,16 +51,20 @@ def protect_firmware(infile, outfile, version, message):
     for frame in frames:
         if len(frame)!= 16:
             while True:
-                frame = frame + b'0'
+                frame = frame + b'\x00'
                 if len(frame) == 16:
                     break
         firmware_hash = sha256_hash(frame)
+        print_hex(frame)
         encrypted_firmware = aes_encrypt(frame)
-        firmware_hash = sha256_hash(encrypted_firmware)
-        print_hex(firmware_hash)
-        print(f'length of enc firmware:  {len(encrypted_firmware)}')
+        print_hex(encrypted_firmware)
+        print()
+        print()
+        # firmware_hash = sha256_hash(encrypted_firmware)
+        # print_hex(firmware_hash)
+        # print(f'length of enc firmware:  {len(encrypted_firmware)}')
         frame_to_send = encrypted_firmware + firmware_hash
-        print(f'len of frame to send: {len(frame_to_send)}')
+        # print(f'len of frame to send: {len(frame_to_send)}')
         firmware_blob += frame_to_send
 
     # Write firmware blob to outfile

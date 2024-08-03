@@ -85,6 +85,8 @@ def send_frame(ser, frame, debug=False):
 
 
 def update(ser, infile, debug):
+    count = 0
+
     # Open firmware file
     with open(infile, "rb") as fp:
         full_file = fp.read()
@@ -104,6 +106,8 @@ def update(ser, infile, debug):
         send_frame(ser, frame)
         resp = ser.read(1)  # Wait for an OK from the bootloader
         print(resp)
+        count += 1
+        print(count)
         time.sleep(0.1)
         if resp != RESP_OK:
             raise RuntimeError("ERROR: Bootloader responded with {}".format(repr(resp)))

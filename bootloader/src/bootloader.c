@@ -217,9 +217,19 @@ void load_firmware(void) {
     volatile uint32_t size_firmware = 256;
     byte decrypted_firmware_hash[32];
     uint8_t fw_buffer [FIRMWARE_SIZE];
+    volatile uint32_t num_frames = 0;
+    uint32_t frame_counter = 0;
+    volatile uint32_t size_frame = 0;
     volatile firmware_hash [32];
 
+    num_frames = size / 16;
+    if (num_frames % 16 != 0){
+        num_frames += 1;
+    } 
+
     while (1) {
+        frame_counter += 1;
+
         // Get two bytes for the length.
         for (int i = 0; i < 2; i++){
             fw_buffer [i] = uart_read(UART0, BLOCKING, &read);
@@ -257,16 +267,18 @@ void load_firmware(void) {
                 return;
             }
 
+            char last_frame_decrypted_firmware[3];
+
             uint8_t firmware_received_hash[32];
             wc_Sha256 sha;
             wc_InitSha256(&sha);
             wc_Sha256Update(&sha, (const byte*)decrypted_firmware, sizeof(decrypted_firmware));
             wc_Sha256Final(&sha, firmware_received_hash);
-            
+
             // Compute hash of the decrypted firmware
             uint8_t expected_hash[32];
             wc_Sha256Hash(decrypted_firmware, sizeof(decrypted_firmware), expected_hash);
-
+            
             // Compare the computed hash with the received hash
             if (memcmp(firmware_received_hash, expected_hash, sizeof(firmware_received_hash)) != 0) {
                 uart_write(UART0, ERROR); // Reject the firmware
@@ -274,13 +286,62 @@ void load_firmware(void) {
                 return;
             }
 
-            for (int i = 0; i < FIRMWARE_SIZE; ++i) {
-                data[data_index] = fw_buffer[i];
-                data_index += 1;
-            } // for
+            if (num_frames == frame_counter){
+                size_frame = size % 16;
+                for (int i = 0; i < size_frame; i ++){
+                    last_frame_decrypted_firmware[i] = decrypted_firmware[i];
+                }
+                for (int i = 0; i < size%16; ++i) {
+                    data[data_index] = last_frame_decrypted_firmware[i];
+                    data_index += 1;
+                    if (data_index == FLASH_PAGESIZE) {
+                        // Try to write flash and check for error
+                        if (program_flash((uint8_t *) page_addr, data, data_index)) {
+                            uart_write(UART0, ERROR); // Reject the firmware
+                            SysCtlReset();            // Reset device
+                            return;
+                        }
+
+                        // Update to next page
+                        page_addr += FLASH_PAGESIZE;
+                        data_index = 0;
+
+                        // If at end of firmware, go to main
+                        if (size_firmware == 0) {
+                            uart_write(UART0, OK);
+                            break;
+                        }
+                    }
+
+                } // for
+            } else {
+                for (int i = 0; i < FIRMWARE_SIZE; ++i) {
+                    data[data_index] = decrypted_firmware[i];
+                    data_index += 1;
+                    if (data_index == FLASH_PAGESIZE) {
+                        // Try to write flash and check for error
+                        if (program_flash((uint8_t *) page_addr, data, data_index)) {
+                            uart_write(UART0, ERROR); // Reject the firmware
+                            SysCtlReset();            // Reset device
+                            return;
+                        }
+
+                        // Update to next page
+                        page_addr += FLASH_PAGESIZE;
+                        data_index = 0;
+
+                        // If at end of firmware, go to main
+                        if (size_firmware == 0) {
+                            uart_write(UART0, OK);
+                            break;
+                        }
+                    }
+                } // for
+            }
         }
 
-        if (data_index == FLASH_PAGESIZE || size_firmware == 0) {
+
+        if (size_firmware == 0) {
             // Try to write flash and check for error
             if (program_flash((uint8_t *) page_addr, data, data_index)) {
                 uart_write(UART0, ERROR); // Reject the firmware
@@ -295,9 +356,9 @@ void load_firmware(void) {
             // If at end of firmware, go to main
             if (size_firmware == 0) {
                 uart_write(UART0, OK);
-                break;
+                return;
             }
-        } // if
+        }
 
         uart_write(UART0, OK); // Acknowledge the frame.
     } // while(1)
