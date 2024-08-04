@@ -286,7 +286,7 @@ void load_firmware(void) {
                 return;
             }
 
-            char last_frame_decrypted_firmware[3];
+            char last_frame_decrypted_firmware[256];
 
             uint8_t firmware_received_hash[32];
             wc_Sha256 sha;
