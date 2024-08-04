@@ -49,4 +49,3 @@ typedef struct fw_meta_s {
 long program_flash(void* page_addr, unsigned char * data, unsigned int data_len);
 
 #endif
-

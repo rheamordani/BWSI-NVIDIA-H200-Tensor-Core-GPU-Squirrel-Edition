@@ -28,83 +28,118 @@ import time
 import serial
 
 from util import *
+from Crypto.Random import get_random_bytes
+from Crypto.PublicKey import RSA
+from Crypto.Cipher import AES
+from Crypto.Signature import pkcs1_15
+from Crypto.Hash import SHA256
+from Crypto.Util.Padding import pad, unpad
 
 ser = serial.Serial("/dev/ttyACM0", 115200)
 
 RESP_OK = b"\x00"
-FRAME_SIZE = 256
 
 
-def send_metadata(ser, metadata, debug=False):
+def send_first_frame(ser, begin_frame, debug=False):
+    release_message_size = u16(begin_frame [:2], endian = 'little')
+    metadata = begin_frame[2+release_message_size:2+4+release_message_size]
+
     assert(len(metadata) == 4)
     version = u16(metadata[:2], endian='little')
     size = u16(metadata[2:], endian='little')
+
     print(f"Version: {version}\nSize: {size} bytes\n")
 
     # Handshake for update
     ser.write(b"U")
 
-    print("Waiting for bootloader to enter update mode...")
+    print("Waiting for bootloader to enter update mode...") 
     while ser.read(1).decode() != "U":
         print("got a byte")
         pass
 
-    # Send size and version to bootloader.
+    #    Send size and version to bootloader.
     if debug:
         print(metadata)
 
-    ser.write(metadata)
+    # print('begin frame: ')
+    # print_hex(begin_frame)
+    # print(f'length of frame 0: {len(begin_frame)}')
 
+    ser.write(begin_frame)
     # Wait for an OK from the bootloader.
+    # print('waiting for bootloader confirmation')
     resp = ser.read(1)
     if resp != RESP_OK:
-        raise RuntimeError("ERROR: Bootloader responded with {}".format(repr(resp)))
+        raise RuntimeError("ERROR: Bootloader responded with {}".format(repr(resp)))    
+
 
 
 def send_frame(ser, frame, debug=False):
     ser.write(frame)  # Write the frame...
 
+    # print('data frame: ')
+    # print_hex(frame)
+    # print(f'length of frame: {len(frame)}')
+
     if debug:
         print_hex(frame)
 
-    resp = ser.read(1)  # Wait for an OK from the bootloader
-
-    time.sleep(0.1)
-
-    if resp != RESP_OK:
-        raise RuntimeError("ERROR: Bootloader responded with {}".format(repr(resp)))
-
-    if debug:
-        print("Resp: {}".format(ord(resp)))
-
 
 def update(ser, infile, debug):
-    # Open serial port. Set baudrate to 115200. Set timeout to 2 seconds.
+    count = 0
+
+    # Open firmware file
     with open(infile, "rb") as fp:
-        firmware_blob = fp.read()
+        full_file = fp.read()
 
-    metadata = firmware_blob[:4]
-    firmware = firmware_blob[4:]
+    release_message_size = u16(full_file [:2], endian = 'little')
+    release_message = full_file[2: release_message_size+2]
 
-    send_metadata(ser, metadata, debug=debug)
+    # print(release_message)
+    # print(release_message_size)
+        
+    begin_frame_data = full_file [release_message_size+2 : release_message_size+2+52]
 
-    for idx, frame_start in enumerate(range(0, len(firmware), FRAME_SIZE)):
-        data = firmware[frame_start : frame_start + FRAME_SIZE]
+    begin_frame = p16(release_message_size, endian = 'little') + release_message + begin_frame_data
+    # print(begin_frame)
 
-        # Construct frame.
-        frame = p16(len(data), endian='big') + data
+    send_first_frame (ser, begin_frame)
 
-        send_frame(ser, frame, debug=debug)
-        print(f"Wrote frame {idx} ({len(frame)} bytes)")
+    data_frames = full_file [release_message_size+2+52 : ]
+    # print(data_frames)
+
+    frames = [data_frames[i : i + 48] for i in range(0, len(data_frames), 48)]
+
+    for frame in frames:
+        send_frame(ser, frame)
+        resp = ser.read(1)  # Wait for an OK from the bootloader
+        # print(resp)
+        count += 1
+        # print(count)
+        time.sleep(0.1)
+        if resp != RESP_OK:
+            raise RuntimeError("ERROR: Bootloader responded with {}".format(repr(resp)))
+        # else:
+        #     print('sending 2nd frame')
+        # send_frame(ser, frame)
+        # resp = ser.read(1)  # Wait for an OK from the bootloader
+        # time.sleep(0.1)
+        # if resp != RESP_OK:
+        #     raise RuntimeError("ERROR: Bootloader responded with {}".format(repr(resp)))
+
 
     print("Done writing firmware.")
 
-    # Send a zero length payload to tell the bootlader to finish writing it's page.
+    # Send a zero length payload to signal the bootloader to finish writing the page
     ser.write(p16(0x0000, endian='big'))
+    # ser.write(release_message_and_null_terminator)
+
     resp = ser.read(1)  # Wait for an OK from the bootloader
     if resp != RESP_OK:
         raise RuntimeError("ERROR: Bootloader responded to zero length frame with {}".format(repr(resp)))
     print(f"Wrote zero length frame (2 bytes)")
+
 
     return ser
 
