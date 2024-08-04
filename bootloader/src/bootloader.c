@@ -47,6 +47,7 @@ void uart_write_hex_bytes(uint8_t, uint8_t *, uint32_t);
 #define IV_SIZE 16
 #define FIRMWARE_SIZE 16
 
+
 // Device metadata
 uint16_t * fw_version_address = (uint16_t *)METADATA_BASE;
 uint16_t * fw_size_address = (uint16_t *)(METADATA_BASE + 2);
@@ -139,14 +140,31 @@ void load_firmware(void) {
     uint32_t data_index = 0;
     uint32_t page_addr = FW_BASE;
     uint32_t version = 0;
+    uint32_t release_message_size = 0;
     uint32_t size = 0;
     volatile byte iv[IV_SIZE];
     volatile byte metadata_hash[32];
+    volatile char release_message[1024];
+
+    for (int i = 0; i < 1024; i++){
+        release_message[i] = 0;
+    }
 
     // BEGIN FRAME STRUCTURE
     // |                    |                 |                 |                                     |
     // | version (2 bytes)  |  size (2 bytes) |  iv (16 bytes)  |  sha256 hash of metadata (32 bytes) | 
     // |                    |                 |                 |                                     |
+
+    // Get release_message_size.
+    rcv = uart_read(UART0, BLOCKING, &read);
+    release_message_size = (uint32_t)rcv;
+    rcv = uart_read(UART0, BLOCKING, &read);
+    release_message_size |= (uint32_t)rcv << 8;
+
+    for (int i = 0; i < release_message_size; i++){
+        release_message [i] = uart_read(UART0, BLOCKING, &read);
+    }
+    release_message[release_message_size + 1] = '\0';
 
     // Get version.
     rcv = uart_read(UART0, BLOCKING, &read);
@@ -193,7 +211,8 @@ void load_firmware(void) {
     // Create 32 bit word for flash programming, version is at lower address, size is at higher address
     uint32_t metadata = ((size & 0xFFFF) << 16) | (version & 0xFFFF);
     program_flash((uint8_t *) METADATA_BASE, (uint8_t *)(&metadata), 4);
-
+    
+    
 
     uint8_t metadata_buffer[4];
     metadata_buffer[0] = (uint8_t)(version & 0xFF);
@@ -343,6 +362,22 @@ void load_firmware(void) {
 
         if (size_firmware == 0) {
             // Try to write flash and check for error
+            for (int i = 0; i < release_message_size+1; ++i) {
+                data[data_index] = release_message[i];
+                data_index += 1;
+                if (data_index == FLASH_PAGESIZE) {
+                    // Try to write flash and check for error
+                    if (program_flash((uint8_t *) page_addr, data, data_index)) {
+                        uart_write(UART0, ERROR); // Reject the firmware
+                        SysCtlReset();            // Reset device
+                        return;
+                    }
+
+                    // Update to next page
+                    page_addr += FLASH_PAGESIZE;
+                    data_index = 0;
+                }
+            }
             if (program_flash((uint8_t *) page_addr, data, data_index)) {
                 uart_write(UART0, ERROR); // Reject the firmware
                 SysCtlReset();            // Reset device
@@ -424,15 +459,15 @@ void boot_firmware(void) {
         SysCtlReset();            // Reset device
         return;
     }
-
     // compute the release message address, and then print it
+    uart_write_str(UART0, "Booting NVIDIA-H200-Tensor-Core-GPU-Squirrel-Edition firmware\n");
     uint16_t fw_size = *fw_size_address;
     fw_release_message_address = (uint8_t *)(FW_BASE + fw_size);
     uart_write_str(UART0, (char *)fw_release_message_address);
-
     // Boot the firmware
     __asm("LDR R0,=0x10001\n\t"
           "BX R0\n\t");
+
 }
 
 void uart_write_hex_bytes(uint8_t uart, uint8_t * start, uint32_t len) {

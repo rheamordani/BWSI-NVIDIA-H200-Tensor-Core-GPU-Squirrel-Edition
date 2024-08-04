@@ -41,7 +41,9 @@ RESP_OK = b"\x00"
 
 
 def send_first_frame(ser, begin_frame, debug=False):
-    metadata = begin_frame [:4]
+    release_message_size = u16(begin_frame [:2], endian = 'little')
+    metadata = begin_frame[2+release_message_size:2+4+release_message_size]
+
     assert(len(metadata) == 4)
     version = u16(metadata[:2], endian='little')
     size = u16(metadata[2:], endian='little')
@@ -60,13 +62,13 @@ def send_first_frame(ser, begin_frame, debug=False):
     if debug:
         print(metadata)
 
-    print('begin frame: ')
-    print_hex(begin_frame)
-    print(f'length of frame 0: {len(begin_frame)}')
+    # print('begin frame: ')
+    # print_hex(begin_frame)
+    # print(f'length of frame 0: {len(begin_frame)}')
 
     ser.write(begin_frame)
     # Wait for an OK from the bootloader.
-    print('waiting for bootloader confirmation')
+    # print('waiting for bootloader confirmation')
     resp = ser.read(1)
     if resp != RESP_OK:
         raise RuntimeError("ERROR: Bootloader responded with {}".format(repr(resp)))    
@@ -76,9 +78,9 @@ def send_first_frame(ser, begin_frame, debug=False):
 def send_frame(ser, frame, debug=False):
     ser.write(frame)  # Write the frame...
 
-    print('data frame: ')
-    print_hex(frame)
-    print(f'length of frame: {len(frame)}')
+    # print('data frame: ')
+    # print_hex(frame)
+    # print(f'length of frame: {len(frame)}')
 
     if debug:
         print_hex(frame)
@@ -90,29 +92,36 @@ def update(ser, infile, debug):
     # Open firmware file
     with open(infile, "rb") as fp:
         full_file = fp.read()
+
+    release_message_size = u16(full_file [:2], endian = 'little')
+    release_message = full_file[2: release_message_size+2]
+
+    # print(release_message)
+    # print(release_message_size)
         
-    begin_frame = full_file [:52]
+    begin_frame_data = full_file [release_message_size+2 : release_message_size+2+52]
+
+    begin_frame = p16(release_message_size, endian = 'little') + release_message + begin_frame_data
+    # print(begin_frame)
 
     send_first_frame (ser, begin_frame)
-    
-    data_frames = full_file [52:]
-    print(data_frames)
 
-    # release_message_and_null_terminator = full_file [size + 32*num_frames + 2*num_frames: ]
+    data_frames = full_file [release_message_size+2+52 : ]
+    # print(data_frames)
 
     frames = [data_frames[i : i + 48] for i in range(0, len(data_frames), 48)]
 
     for frame in frames:
         send_frame(ser, frame)
         resp = ser.read(1)  # Wait for an OK from the bootloader
-        print(resp)
+        # print(resp)
         count += 1
-        print(count)
+        # print(count)
         time.sleep(0.1)
         if resp != RESP_OK:
             raise RuntimeError("ERROR: Bootloader responded with {}".format(repr(resp)))
-        else:
-            print('sending 2nd frame')
+        # else:
+        #     print('sending 2nd frame')
         # send_frame(ser, frame)
         # resp = ser.read(1)  # Wait for an OK from the bootloader
         # time.sleep(0.1)

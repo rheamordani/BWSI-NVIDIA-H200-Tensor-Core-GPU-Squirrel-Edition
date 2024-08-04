@@ -35,14 +35,22 @@ def protect_firmware(infile, outfile, version, message):
     with open(infile, "rb") as fp:
         firmware = fp.read()
     
+    release_message = message.encode()
+
+    # print(release_message)
+
+    release_message_size = p16(len(release_message), endian = 'little')
+
+    # print(release_message_size)
+
     # pack metadata
     metadata = p16(version, endian='little') + p16(len(firmware), endian='little')
     
     # hash metadata
     metadata_hash = sha256_hash(metadata)
     
-    begin_frame = metadata + iv + metadata_hash
-
+    begin_frame = release_message_size + release_message + metadata + iv + metadata_hash
+    
     firmware_blob = begin_frame
 
     # append frames of encrypted firmware with the hash of the decrypted_data   
@@ -55,11 +63,11 @@ def protect_firmware(infile, outfile, version, message):
                 if len(frame) == 16:
                     break
         firmware_hash = sha256_hash(frame)
-        print_hex(frame)
+        # print_hex(frame)
         encrypted_firmware = aes_encrypt(frame)
-        print_hex(encrypted_firmware)
-        print()
-        print()
+        # print_hex(encrypted_firmware)
+        # print()
+        # print()
         # firmware_hash = sha256_hash(encrypted_firmware)
         # print_hex(firmware_hash)
         # print(f'length of enc firmware:  {len(encrypted_firmware)}')
